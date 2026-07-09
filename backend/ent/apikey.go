@@ -46,6 +46,10 @@ type APIKey struct {
 	Quota float64 `json:"quota,omitempty"`
 	// Used quota amount in USD
 	QuotaUsed float64 `json:"quota_used,omitempty"`
+	// Extra rate-limit overflow quota in USD for this API key (0 = disabled)
+	ExtraQuota float64 `json:"extra_quota,omitempty"`
+	// Used extra rate-limit overflow quota amount in USD
+	ExtraQuotaUsed float64 `json:"extra_quota_used,omitempty"`
 	// Expiration time for this API key (null = never expires)
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// Rate limit in USD per 5 hours (0 = unlimited)
@@ -123,7 +127,7 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
 			values[i] = new([]byte)
-		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
+		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldExtraQuota, apikey.FieldExtraQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
 			values[i] = new(sql.NullFloat64)
 		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID:
 			values[i] = new(sql.NullInt64)
@@ -236,6 +240,18 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field quota_used", values[i])
 			} else if value.Valid {
 				_m.QuotaUsed = value.Float64
+			}
+		case apikey.FieldExtraQuota:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field extra_quota", values[i])
+			} else if value.Valid {
+				_m.ExtraQuota = value.Float64
+			}
+		case apikey.FieldExtraQuotaUsed:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field extra_quota_used", values[i])
+			} else if value.Valid {
+				_m.ExtraQuotaUsed = value.Float64
 			}
 		case apikey.FieldExpiresAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -396,6 +412,12 @@ func (_m *APIKey) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("quota_used=")
 	builder.WriteString(fmt.Sprintf("%v", _m.QuotaUsed))
+	builder.WriteString(", ")
+	builder.WriteString("extra_quota=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ExtraQuota))
+	builder.WriteString(", ")
+	builder.WriteString("extra_quota_used=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ExtraQuotaUsed))
 	builder.WriteString(", ")
 	if v := _m.ExpiresAt; v != nil {
 		builder.WriteString("expires_at=")

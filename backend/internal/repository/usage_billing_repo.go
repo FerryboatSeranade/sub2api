@@ -441,15 +441,46 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 
 func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKeyID int64, cost float64) error {
 	res, err := tx.ExecContext(ctx, `
+		WITH current_key AS (
+			SELECT
+				id,
+				usage_5h,
+				usage_1d,
+				usage_7d,
+				window_5h_start,
+				window_1d_start,
+				window_7d_start,
+				rate_limit_5h,
+				rate_limit_1d,
+				rate_limit_7d,
+				extra_quota
+			FROM api_keys
+			WHERE id = $2 AND deleted_at IS NULL
+		),
+		calculated AS (
+			SELECT
+				*,
+				GREATEST(
+					0::numeric,
+					$1::numeric - LEAST(
+						CASE WHEN rate_limit_5h > 0 THEN GREATEST(rate_limit_5h - CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' > NOW() THEN usage_5h ELSE 0::numeric END, 0::numeric) ELSE $1::numeric END,
+						CASE WHEN rate_limit_1d > 0 THEN GREATEST(rate_limit_1d - CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' > NOW() THEN usage_1d ELSE 0::numeric END, 0::numeric) ELSE $1::numeric END,
+						CASE WHEN rate_limit_7d > 0 THEN GREATEST(rate_limit_7d - CASE WHEN window_7d_start IS NOT NULL AND window_7d_start + INTERVAL '7 days' > NOW() THEN usage_7d ELSE 0::numeric END, 0::numeric) ELSE $1::numeric END
+					)
+				) AS extra_quota_delta
+			FROM current_key
+		)
 		UPDATE api_keys SET
-			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
-			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1 ELSE usage_1d + $1 END,
-			usage_7d = CASE WHEN window_7d_start IS NOT NULL AND window_7d_start + INTERVAL '7 days' <= NOW() THEN $1 ELSE usage_7d + $1 END,
-			window_5h_start = CASE WHEN window_5h_start IS NULL OR window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE window_5h_start END,
-			window_1d_start = CASE WHEN window_1d_start IS NULL OR window_1d_start + INTERVAL '24 hours' <= NOW() THEN date_trunc('day', NOW()) ELSE window_1d_start END,
-			window_7d_start = CASE WHEN window_7d_start IS NULL OR window_7d_start + INTERVAL '7 days' <= NOW() THEN date_trunc('day', NOW()) ELSE window_7d_start END,
+			usage_5h = CASE WHEN calculated.window_5h_start IS NOT NULL AND calculated.window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1::numeric ELSE calculated.usage_5h + $1::numeric END,
+			usage_1d = CASE WHEN calculated.window_1d_start IS NOT NULL AND calculated.window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1::numeric ELSE calculated.usage_1d + $1::numeric END,
+			usage_7d = CASE WHEN calculated.window_7d_start IS NOT NULL AND calculated.window_7d_start + INTERVAL '7 days' <= NOW() THEN $1::numeric ELSE calculated.usage_7d + $1::numeric END,
+			extra_quota_used = extra_quota_used + CASE WHEN calculated.extra_quota > 0 THEN calculated.extra_quota_delta ELSE 0::numeric END,
+			window_5h_start = CASE WHEN calculated.window_5h_start IS NULL OR calculated.window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE calculated.window_5h_start END,
+			window_1d_start = CASE WHEN calculated.window_1d_start IS NULL OR calculated.window_1d_start + INTERVAL '24 hours' <= NOW() THEN date_trunc('day', NOW()) ELSE calculated.window_1d_start END,
+			window_7d_start = CASE WHEN calculated.window_7d_start IS NULL OR calculated.window_7d_start + INTERVAL '7 days' <= NOW() THEN date_trunc('day', NOW()) ELSE calculated.window_7d_start END,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
+		FROM calculated
+		WHERE api_keys.id = calculated.id
 	`, cost, apiKeyID)
 	if err != nil {
 		return err

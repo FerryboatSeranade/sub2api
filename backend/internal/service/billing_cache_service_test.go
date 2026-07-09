@@ -130,3 +130,33 @@ func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 	})
 	require.False(t, enqueued)
 }
+
+func TestBillingCacheServiceEvaluateRateLimits_UsesExtraQuotaAfterRegularWindowLimit(t *testing.T) {
+	svc := &BillingCacheService{}
+	apiKey := &APIKey{
+		ID:             1,
+		RateLimit5h:    5,
+		ExtraQuota:     10,
+		ExtraQuotaUsed: 3,
+	}
+
+	err := svc.evaluateRateLimits(context.Background(), apiKey, 5, 0, 0, billingCacheTimePtr(time.Now()), nil, nil, apiKey.ExtraQuotaUsed)
+	require.NoError(t, err)
+}
+
+func TestBillingCacheServiceEvaluateRateLimits_RejectsWhenExtraQuotaExhausted(t *testing.T) {
+	svc := &BillingCacheService{}
+	apiKey := &APIKey{
+		ID:             1,
+		RateLimit5h:    5,
+		ExtraQuota:     10,
+		ExtraQuotaUsed: 10,
+	}
+
+	err := svc.evaluateRateLimits(context.Background(), apiKey, 5, 0, 0, billingCacheTimePtr(time.Now()), nil, nil, apiKey.ExtraQuotaUsed)
+	require.ErrorIs(t, err, ErrAPIKeyRateLimit5hExceeded)
+}
+
+func billingCacheTimePtr(t time.Time) *time.Time {
+	return &t
+}

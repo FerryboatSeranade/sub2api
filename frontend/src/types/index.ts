@@ -581,13 +581,15 @@ export interface ApiKey {
   key: string
   name: string
   group_id: number | null
-  status: 'active' | 'inactive' | 'quota_exhausted' | 'expired'
+  status: 'active' | 'disabled' | 'inactive' | 'quota_exhausted' | 'expired'
   ip_whitelist: string[]
   ip_blacklist: string[]
   last_used_at: string | null
   last_used_ip: string | null
   quota: number // Quota limit in USD (0 = unlimited)
   quota_used: number // Used quota amount in USD
+  extra_quota: number // Extra rate-limit overflow quota in USD (0 = disabled)
+  extra_quota_used: number // Used extra rate-limit overflow quota amount in USD
   expires_at: string | null // Expiration time (null = never expires)
   created_at: string
   updated_at: string
@@ -614,7 +616,9 @@ export interface CreateApiKeyRequest {
   ip_whitelist?: string[]
   ip_blacklist?: string[]
   quota?: number // Quota limit in USD (0 = unlimited)
+  extra_quota?: number // Extra rate-limit overflow quota in USD (0 = disabled)
   expires_in_days?: number // Days until expiry (null = never expires)
+  expires_at?: string // Absolute expiration time
   rate_limit_5h?: number
   rate_limit_1d?: number
   rate_limit_7d?: number
@@ -623,12 +627,14 @@ export interface CreateApiKeyRequest {
 export interface UpdateApiKeyRequest {
   name?: string
   group_id?: number | null
-  status?: 'active' | 'inactive'
+  status?: 'active' | 'disabled' | 'inactive'
   ip_whitelist?: string[]
   ip_blacklist?: string[]
   quota?: number // Quota limit in USD (null = no change, 0 = unlimited)
+  extra_quota?: number // Extra rate-limit overflow quota in USD
   expires_at?: string | null // Expiration time (null = no change)
   reset_quota?: boolean // Reset quota_used to 0
+  reset_extra_quota?: boolean // Reset extra_quota_used to 0
   rate_limit_5h?: number
   rate_limit_1d?: number
   rate_limit_7d?: number

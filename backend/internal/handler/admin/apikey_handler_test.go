@@ -20,8 +20,81 @@ func setupAPIKeyHandler(adminSvc service.AdminService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	h := NewAdminAPIKeyHandler(adminSvc)
+	router.POST("/api/v1/admin/users/:id/api-keys", h.CreateForUser)
 	router.PUT("/api/v1/admin/api-keys/:id", h.UpdateGroup)
 	return router
+}
+
+func TestAdminAPIKeyHandler_CreateForUser(t *testing.T) {
+	router := setupAPIKeyHandler(newStubAdminService())
+	expiresAt := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
+	body := `{"name":"customer-key","group_id":2,"custom_key":"sk_custom_1234567890","quota":100,"extra_quota":25,"expires_at":"` + expiresAt + `","rate_limit_5h":5,"rate_limit_7d":50}`
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users/1/api-keys", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			UserID      int64      `json:"user_id"`
+			Key         string     `json:"key"`
+			Name        string     `json:"name"`
+			GroupID     *int64     `json:"group_id"`
+			Quota       float64    `json:"quota"`
+			ExtraQuota  float64    `json:"extra_quota"`
+			ExpiresAt   *time.Time `json:"expires_at"`
+			RateLimit5h float64    `json:"rate_limit_5h"`
+			RateLimit7d float64    `json:"rate_limit_7d"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.Equal(t, int64(1), resp.Data.UserID)
+	require.Equal(t, "sk_custom_1234567890", resp.Data.Key)
+	require.Equal(t, "customer-key", resp.Data.Name)
+	require.NotNil(t, resp.Data.GroupID)
+	require.Equal(t, int64(2), *resp.Data.GroupID)
+	require.Equal(t, 100.0, resp.Data.Quota)
+	require.Equal(t, 25.0, resp.Data.ExtraQuota)
+	require.NotNil(t, resp.Data.ExpiresAt)
+	require.Equal(t, 5.0, resp.Data.RateLimit5h)
+	require.Equal(t, 50.0, resp.Data.RateLimit7d)
+}
+
+func TestAdminAPIKeyHandler_CreateForUser_CamelCaseExtraQuota(t *testing.T) {
+	router := setupAPIKeyHandler(newStubAdminService())
+	body := `{"name":"customer-key","extraQuota":25}`
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users/1/api-keys", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data struct {
+			ExtraQuota float64 `json:"extra_quota"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 25.0, resp.Data.ExtraQuota)
+}
+
+func TestAdminAPIKeyHandler_CreateForUser_InvalidExpiresAt(t *testing.T) {
+	router := setupAPIKeyHandler(newStubAdminService())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users/1/api-keys", bytes.NewBufferString(`{"name":"customer-key","expires_at":"not-a-time"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "Invalid expires_at format")
 }
 
 func TestAdminAPIKeyHandler_UpdateGroup_InvalidID(t *testing.T) {
@@ -157,6 +230,31 @@ func TestAdminAPIKeyHandler_ResetRateLimitUsage(t *testing.T) {
 	require.Nil(t, resp.Data.APIKey.Window7dStart)
 }
 
+func TestAdminAPIKeyHandler_UpdateGroup_CamelCaseExtraQuota(t *testing.T) {
+	svc := newStubAdminService()
+	svc.apiKeys[0].ExtraQuotaUsed = 10
+	router := setupAPIKeyHandler(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10", bytes.NewBufferString(`{"extraQuota":25,"resetExtraQuota":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data struct {
+			APIKey struct {
+				ExtraQuota     float64 `json:"extra_quota"`
+				ExtraQuotaUsed float64 `json:"extra_quota_used"`
+			} `json:"api_key"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 25.0, resp.Data.APIKey.ExtraQuota)
+	require.Zero(t, resp.Data.APIKey.ExtraQuotaUsed)
+}
+
 func TestAdminAPIKeyHandler_UpdateGroup_ServiceError(t *testing.T) {
 	svc := &failingUpdateGroupService{
 		stubAdminService: newStubAdminService(),
@@ -231,10 +329,14 @@ func TestAdminAPIKeyHandler_UpdateGroup_NegativeGroupID(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "INVALID_GROUP_ID")
 }
 
-// failingUpdateGroupService overrides AdminUpdateAPIKeyGroupID to return an error.
+// failingUpdateGroupService overrides AdminUpdateAPIKey to return an error.
 type failingUpdateGroupService struct {
 	*stubAdminService
 	err error
+}
+
+func (f *failingUpdateGroupService) AdminUpdateAPIKey(_ context.Context, _ int64, _ *service.AdminUpdateAPIKeyInput) (*service.AdminUpdateAPIKeyGroupIDResult, error) {
+	return nil, f.err
 }
 
 func (f *failingUpdateGroupService) AdminUpdateAPIKeyGroupID(_ context.Context, _ int64, _ *int64) (*service.AdminUpdateAPIKeyGroupIDResult, error) {

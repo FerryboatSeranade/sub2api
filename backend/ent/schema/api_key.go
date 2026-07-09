@@ -69,6 +69,14 @@ func (APIKey) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
 			Default(0).
 			Comment("Used quota amount in USD"),
+		field.Float("extra_quota").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
+			Default(0).
+			Comment("Extra rate-limit overflow quota in USD for this API key (0 = disabled)"),
+		field.Float("extra_quota_used").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
+			Default(0).
+			Comment("Used extra rate-limit overflow quota amount in USD"),
 		// Expiration time (nil = never expires)
 		field.Time("expires_at").
 			Optional().
@@ -143,6 +151,7 @@ func (APIKey) Indexes() []ent.Index {
 		index.Fields("last_used_at"),
 		// Index for quota queries
 		index.Fields("quota", "quota_used"),
+		index.Fields("extra_quota", "extra_quota_used"),
 		index.Fields("expires_at"),
 	}
 }

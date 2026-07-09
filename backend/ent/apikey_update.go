@@ -232,6 +232,48 @@ func (_u *APIKeyUpdate) AddQuotaUsed(v float64) *APIKeyUpdate {
 	return _u
 }
 
+// SetExtraQuota sets the "extra_quota" field.
+func (_u *APIKeyUpdate) SetExtraQuota(v float64) *APIKeyUpdate {
+	_u.mutation.ResetExtraQuota()
+	_u.mutation.SetExtraQuota(v)
+	return _u
+}
+
+// SetNillableExtraQuota sets the "extra_quota" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableExtraQuota(v *float64) *APIKeyUpdate {
+	if v != nil {
+		_u.SetExtraQuota(*v)
+	}
+	return _u
+}
+
+// AddExtraQuota adds value to the "extra_quota" field.
+func (_u *APIKeyUpdate) AddExtraQuota(v float64) *APIKeyUpdate {
+	_u.mutation.AddExtraQuota(v)
+	return _u
+}
+
+// SetExtraQuotaUsed sets the "extra_quota_used" field.
+func (_u *APIKeyUpdate) SetExtraQuotaUsed(v float64) *APIKeyUpdate {
+	_u.mutation.ResetExtraQuotaUsed()
+	_u.mutation.SetExtraQuotaUsed(v)
+	return _u
+}
+
+// SetNillableExtraQuotaUsed sets the "extra_quota_used" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableExtraQuotaUsed(v *float64) *APIKeyUpdate {
+	if v != nil {
+		_u.SetExtraQuotaUsed(*v)
+	}
+	return _u
+}
+
+// AddExtraQuotaUsed adds value to the "extra_quota_used" field.
+func (_u *APIKeyUpdate) AddExtraQuotaUsed(v float64) *APIKeyUpdate {
+	_u.mutation.AddExtraQuotaUsed(v)
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *APIKeyUpdate) SetExpiresAt(v time.Time) *APIKeyUpdate {
 	_u.mutation.SetExpiresAt(v)
@@ -636,6 +678,18 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedQuotaUsed(); ok {
 		_spec.AddField(apikey.FieldQuotaUsed, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.ExtraQuota(); ok {
+		_spec.SetField(apikey.FieldExtraQuota, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedExtraQuota(); ok {
+		_spec.AddField(apikey.FieldExtraQuota, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.ExtraQuotaUsed(); ok {
+		_spec.SetField(apikey.FieldExtraQuotaUsed, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedExtraQuotaUsed(); ok {
+		_spec.AddField(apikey.FieldExtraQuotaUsed, field.TypeFloat64, value)
+	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(apikey.FieldExpiresAt, field.TypeTime, value)
 	}
@@ -1016,6 +1070,48 @@ func (_u *APIKeyUpdateOne) SetNillableQuotaUsed(v *float64) *APIKeyUpdateOne {
 // AddQuotaUsed adds value to the "quota_used" field.
 func (_u *APIKeyUpdateOne) AddQuotaUsed(v float64) *APIKeyUpdateOne {
 	_u.mutation.AddQuotaUsed(v)
+	return _u
+}
+
+// SetExtraQuota sets the "extra_quota" field.
+func (_u *APIKeyUpdateOne) SetExtraQuota(v float64) *APIKeyUpdateOne {
+	_u.mutation.ResetExtraQuota()
+	_u.mutation.SetExtraQuota(v)
+	return _u
+}
+
+// SetNillableExtraQuota sets the "extra_quota" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableExtraQuota(v *float64) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetExtraQuota(*v)
+	}
+	return _u
+}
+
+// AddExtraQuota adds value to the "extra_quota" field.
+func (_u *APIKeyUpdateOne) AddExtraQuota(v float64) *APIKeyUpdateOne {
+	_u.mutation.AddExtraQuota(v)
+	return _u
+}
+
+// SetExtraQuotaUsed sets the "extra_quota_used" field.
+func (_u *APIKeyUpdateOne) SetExtraQuotaUsed(v float64) *APIKeyUpdateOne {
+	_u.mutation.ResetExtraQuotaUsed()
+	_u.mutation.SetExtraQuotaUsed(v)
+	return _u
+}
+
+// SetNillableExtraQuotaUsed sets the "extra_quota_used" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableExtraQuotaUsed(v *float64) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetExtraQuotaUsed(*v)
+	}
+	return _u
+}
+
+// AddExtraQuotaUsed adds value to the "extra_quota_used" field.
+func (_u *APIKeyUpdateOne) AddExtraQuotaUsed(v float64) *APIKeyUpdateOne {
+	_u.mutation.AddExtraQuotaUsed(v)
 	return _u
 }
 
@@ -1452,6 +1548,18 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.AddedQuotaUsed(); ok {
 		_spec.AddField(apikey.FieldQuotaUsed, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.ExtraQuota(); ok {
+		_spec.SetField(apikey.FieldExtraQuota, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedExtraQuota(); ok {
+		_spec.AddField(apikey.FieldExtraQuota, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.ExtraQuotaUsed(); ok {
+		_spec.SetField(apikey.FieldExtraQuotaUsed, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedExtraQuotaUsed(); ok {
+		_spec.AddField(apikey.FieldExtraQuotaUsed, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(apikey.FieldExpiresAt, field.TypeTime, value)

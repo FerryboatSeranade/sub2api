@@ -92,6 +92,8 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 		LastUsedIP:         k.LastUsedIP,
 		Quota:              k.Quota,
 		QuotaUsed:          k.QuotaUsed,
+		ExtraQuota:         k.ExtraQuota,
+		ExtraQuotaUsed:     k.ExtraQuotaUsed,
 		ExpiresAt:          k.ExpiresAt,
 		CreatedAt:          k.CreatedAt,
 		UpdatedAt:          k.UpdatedAt,

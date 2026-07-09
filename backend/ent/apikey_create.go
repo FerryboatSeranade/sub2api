@@ -167,6 +167,34 @@ func (_c *APIKeyCreate) SetNillableQuotaUsed(v *float64) *APIKeyCreate {
 	return _c
 }
 
+// SetExtraQuota sets the "extra_quota" field.
+func (_c *APIKeyCreate) SetExtraQuota(v float64) *APIKeyCreate {
+	_c.mutation.SetExtraQuota(v)
+	return _c
+}
+
+// SetNillableExtraQuota sets the "extra_quota" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableExtraQuota(v *float64) *APIKeyCreate {
+	if v != nil {
+		_c.SetExtraQuota(*v)
+	}
+	return _c
+}
+
+// SetExtraQuotaUsed sets the "extra_quota_used" field.
+func (_c *APIKeyCreate) SetExtraQuotaUsed(v float64) *APIKeyCreate {
+	_c.mutation.SetExtraQuotaUsed(v)
+	return _c
+}
+
+// SetNillableExtraQuotaUsed sets the "extra_quota_used" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableExtraQuotaUsed(v *float64) *APIKeyCreate {
+	if v != nil {
+		_c.SetExtraQuotaUsed(*v)
+	}
+	return _c
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_c *APIKeyCreate) SetExpiresAt(v time.Time) *APIKeyCreate {
 	_c.mutation.SetExpiresAt(v)
@@ -395,6 +423,14 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultQuotaUsed
 		_c.mutation.SetQuotaUsed(v)
 	}
+	if _, ok := _c.mutation.ExtraQuota(); !ok {
+		v := apikey.DefaultExtraQuota
+		_c.mutation.SetExtraQuota(v)
+	}
+	if _, ok := _c.mutation.ExtraQuotaUsed(); !ok {
+		v := apikey.DefaultExtraQuotaUsed
+		_c.mutation.SetExtraQuotaUsed(v)
+	}
 	if _, ok := _c.mutation.RateLimit5h(); !ok {
 		v := apikey.DefaultRateLimit5h
 		_c.mutation.SetRateLimit5h(v)
@@ -462,6 +498,12 @@ func (_c *APIKeyCreate) check() error {
 	}
 	if _, ok := _c.mutation.QuotaUsed(); !ok {
 		return &ValidationError{Name: "quota_used", err: errors.New(`ent: missing required field "APIKey.quota_used"`)}
+	}
+	if _, ok := _c.mutation.ExtraQuota(); !ok {
+		return &ValidationError{Name: "extra_quota", err: errors.New(`ent: missing required field "APIKey.extra_quota"`)}
+	}
+	if _, ok := _c.mutation.ExtraQuotaUsed(); !ok {
+		return &ValidationError{Name: "extra_quota_used", err: errors.New(`ent: missing required field "APIKey.extra_quota_used"`)}
 	}
 	if _, ok := _c.mutation.RateLimit5h(); !ok {
 		return &ValidationError{Name: "rate_limit_5h", err: errors.New(`ent: missing required field "APIKey.rate_limit_5h"`)}
@@ -554,6 +596,14 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.QuotaUsed(); ok {
 		_spec.SetField(apikey.FieldQuotaUsed, field.TypeFloat64, value)
 		_node.QuotaUsed = value
+	}
+	if value, ok := _c.mutation.ExtraQuota(); ok {
+		_spec.SetField(apikey.FieldExtraQuota, field.TypeFloat64, value)
+		_node.ExtraQuota = value
+	}
+	if value, ok := _c.mutation.ExtraQuotaUsed(); ok {
+		_spec.SetField(apikey.FieldExtraQuotaUsed, field.TypeFloat64, value)
+		_node.ExtraQuotaUsed = value
 	}
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(apikey.FieldExpiresAt, field.TypeTime, value)
@@ -880,6 +930,42 @@ func (u *APIKeyUpsert) UpdateQuotaUsed() *APIKeyUpsert {
 // AddQuotaUsed adds v to the "quota_used" field.
 func (u *APIKeyUpsert) AddQuotaUsed(v float64) *APIKeyUpsert {
 	u.Add(apikey.FieldQuotaUsed, v)
+	return u
+}
+
+// SetExtraQuota sets the "extra_quota" field.
+func (u *APIKeyUpsert) SetExtraQuota(v float64) *APIKeyUpsert {
+	u.Set(apikey.FieldExtraQuota, v)
+	return u
+}
+
+// UpdateExtraQuota sets the "extra_quota" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateExtraQuota() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldExtraQuota)
+	return u
+}
+
+// AddExtraQuota adds v to the "extra_quota" field.
+func (u *APIKeyUpsert) AddExtraQuota(v float64) *APIKeyUpsert {
+	u.Add(apikey.FieldExtraQuota, v)
+	return u
+}
+
+// SetExtraQuotaUsed sets the "extra_quota_used" field.
+func (u *APIKeyUpsert) SetExtraQuotaUsed(v float64) *APIKeyUpsert {
+	u.Set(apikey.FieldExtraQuotaUsed, v)
+	return u
+}
+
+// UpdateExtraQuotaUsed sets the "extra_quota_used" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateExtraQuotaUsed() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldExtraQuotaUsed)
+	return u
+}
+
+// AddExtraQuotaUsed adds v to the "extra_quota_used" field.
+func (u *APIKeyUpsert) AddExtraQuotaUsed(v float64) *APIKeyUpsert {
+	u.Add(apikey.FieldExtraQuotaUsed, v)
 	return u
 }
 
@@ -1322,6 +1408,48 @@ func (u *APIKeyUpsertOne) AddQuotaUsed(v float64) *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) UpdateQuotaUsed() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateQuotaUsed()
+	})
+}
+
+// SetExtraQuota sets the "extra_quota" field.
+func (u *APIKeyUpsertOne) SetExtraQuota(v float64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetExtraQuota(v)
+	})
+}
+
+// AddExtraQuota adds v to the "extra_quota" field.
+func (u *APIKeyUpsertOne) AddExtraQuota(v float64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddExtraQuota(v)
+	})
+}
+
+// UpdateExtraQuota sets the "extra_quota" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateExtraQuota() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateExtraQuota()
+	})
+}
+
+// SetExtraQuotaUsed sets the "extra_quota_used" field.
+func (u *APIKeyUpsertOne) SetExtraQuotaUsed(v float64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetExtraQuotaUsed(v)
+	})
+}
+
+// AddExtraQuotaUsed adds v to the "extra_quota_used" field.
+func (u *APIKeyUpsertOne) AddExtraQuotaUsed(v float64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddExtraQuotaUsed(v)
+	})
+}
+
+// UpdateExtraQuotaUsed sets the "extra_quota_used" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateExtraQuotaUsed() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateExtraQuotaUsed()
 	})
 }
 
@@ -1960,6 +2088,48 @@ func (u *APIKeyUpsertBulk) AddQuotaUsed(v float64) *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) UpdateQuotaUsed() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateQuotaUsed()
+	})
+}
+
+// SetExtraQuota sets the "extra_quota" field.
+func (u *APIKeyUpsertBulk) SetExtraQuota(v float64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetExtraQuota(v)
+	})
+}
+
+// AddExtraQuota adds v to the "extra_quota" field.
+func (u *APIKeyUpsertBulk) AddExtraQuota(v float64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddExtraQuota(v)
+	})
+}
+
+// UpdateExtraQuota sets the "extra_quota" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateExtraQuota() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateExtraQuota()
+	})
+}
+
+// SetExtraQuotaUsed sets the "extra_quota_used" field.
+func (u *APIKeyUpsertBulk) SetExtraQuotaUsed(v float64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetExtraQuotaUsed(v)
+	})
+}
+
+// AddExtraQuotaUsed adds v to the "extra_quota_used" field.
+func (u *APIKeyUpsertBulk) AddExtraQuotaUsed(v float64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddExtraQuotaUsed(v)
+	})
+}
+
+// UpdateExtraQuotaUsed sets the "extra_quota_used" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateExtraQuotaUsed() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateExtraQuotaUsed()
 	})
 }
 

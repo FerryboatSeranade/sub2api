@@ -41,7 +41,8 @@ func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
-	builder := r.client.APIKey.Create().
+	client := clientFromContext(ctx, r.client)
+	builder := client.APIKey.Create().
 		SetUserID(key.UserID).
 		SetKey(key.Key).
 		SetName(key.Name).
@@ -50,6 +51,8 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetNillableLastUsedAt(key.LastUsedAt).
 		SetQuota(key.Quota).
 		SetQuotaUsed(key.QuotaUsed).
+		SetExtraQuota(key.ExtraQuota).
+		SetExtraQuotaUsed(key.ExtraQuotaUsed).
 		SetNillableExpiresAt(key.ExpiresAt).
 		SetRateLimit5h(key.RateLimit5h).
 		SetRateLimit1d(key.RateLimit1d).
@@ -138,6 +141,8 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldIPBlacklist,
 			apikey.FieldQuota,
 			apikey.FieldQuotaUsed,
+			apikey.FieldExtraQuota,
+			apikey.FieldExtraQuotaUsed,
 			apikey.FieldExpiresAt,
 			apikey.FieldRateLimit5h,
 			apikey.FieldRateLimit1d,
@@ -227,6 +232,8 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		SetStatus(key.Status).
 		SetQuota(key.Quota).
 		SetQuotaUsed(key.QuotaUsed).
+		SetExtraQuota(key.ExtraQuota).
+		SetExtraQuotaUsed(key.ExtraQuotaUsed).
 		SetRateLimit5h(key.RateLimit5h).
 		SetRateLimit1d(key.RateLimit1d).
 		SetRateLimit7d(key.RateLimit7d).
@@ -732,20 +739,62 @@ func (r *apiKeyRepository) UpdateLastUsed(ctx context.Context, id int64, usedAt 
 	return nil
 }
 
-// IncrementRateLimitUsage atomically increments all rate limit usage counters and initializes
-// window start times via COALESCE if not already set.
+// IncrementRateLimitUsage atomically increments all rate limit usage counters.
+// If configured rate-limit windows have no regular quota left, the overflow
+// portion of this request is charged to extra_quota_used.
 func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error {
-	_, err := r.sql.ExecContext(ctx, `
+	res, err := r.sql.ExecContext(ctx, `
+		WITH current_key AS (
+			SELECT
+				id,
+				usage_5h,
+				usage_1d,
+				usage_7d,
+				window_5h_start,
+				window_1d_start,
+				window_7d_start,
+				rate_limit_5h,
+				rate_limit_1d,
+				rate_limit_7d,
+				extra_quota
+			FROM api_keys
+			WHERE id = $2 AND deleted_at IS NULL
+		),
+		calculated AS (
+			SELECT
+				*,
+				GREATEST(
+					0::numeric,
+					$1::numeric - LEAST(
+						CASE WHEN rate_limit_5h > 0 THEN GREATEST(rate_limit_5h - CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' > NOW() THEN usage_5h ELSE 0::numeric END, 0::numeric) ELSE $1::numeric END,
+						CASE WHEN rate_limit_1d > 0 THEN GREATEST(rate_limit_1d - CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' > NOW() THEN usage_1d ELSE 0::numeric END, 0::numeric) ELSE $1::numeric END,
+						CASE WHEN rate_limit_7d > 0 THEN GREATEST(rate_limit_7d - CASE WHEN window_7d_start IS NOT NULL AND window_7d_start + INTERVAL '7 days' > NOW() THEN usage_7d ELSE 0::numeric END, 0::numeric) ELSE $1::numeric END
+					)
+				) AS extra_quota_delta
+			FROM current_key
+		)
 		UPDATE api_keys SET
-			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
-			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1 ELSE usage_1d + $1 END,
-			usage_7d = CASE WHEN window_7d_start IS NOT NULL AND window_7d_start + INTERVAL '7 days' <= NOW() THEN $1 ELSE usage_7d + $1 END,
-			window_5h_start = CASE WHEN window_5h_start IS NULL OR window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE window_5h_start END,
-			window_1d_start = CASE WHEN window_1d_start IS NULL OR window_1d_start + INTERVAL '24 hours' <= NOW() THEN date_trunc('day', NOW()) ELSE window_1d_start END,
-			window_7d_start = CASE WHEN window_7d_start IS NULL OR window_7d_start + INTERVAL '7 days' <= NOW() THEN date_trunc('day', NOW()) ELSE window_7d_start END,
+			usage_5h = CASE WHEN calculated.window_5h_start IS NOT NULL AND calculated.window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1::numeric ELSE calculated.usage_5h + $1::numeric END,
+			usage_1d = CASE WHEN calculated.window_1d_start IS NOT NULL AND calculated.window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1::numeric ELSE calculated.usage_1d + $1::numeric END,
+			usage_7d = CASE WHEN calculated.window_7d_start IS NOT NULL AND calculated.window_7d_start + INTERVAL '7 days' <= NOW() THEN $1::numeric ELSE calculated.usage_7d + $1::numeric END,
+			extra_quota_used = extra_quota_used + CASE WHEN calculated.extra_quota > 0 THEN calculated.extra_quota_delta ELSE 0::numeric END,
+			window_5h_start = CASE WHEN calculated.window_5h_start IS NULL OR calculated.window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE calculated.window_5h_start END,
+			window_1d_start = CASE WHEN calculated.window_1d_start IS NULL OR calculated.window_1d_start + INTERVAL '24 hours' <= NOW() THEN date_trunc('day', NOW()) ELSE calculated.window_1d_start END,
+			window_7d_start = CASE WHEN calculated.window_7d_start IS NULL OR calculated.window_7d_start + INTERVAL '7 days' <= NOW() THEN date_trunc('day', NOW()) ELSE calculated.window_7d_start END,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL`,
+		FROM calculated
+		WHERE api_keys.id = calculated.id`,
 		cost, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAPIKeyNotFound
+	}
 	return err
 }
 
@@ -768,7 +817,7 @@ func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) 
 // GetRateLimitData returns the current rate limit usage and window start times for an API key.
 func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (result *service.APIKeyRateLimitData, err error) {
 	rows, err := r.sql.QueryContext(ctx, `
-		SELECT usage_5h, usage_1d, usage_7d, window_5h_start, window_1d_start, window_7d_start
+		SELECT usage_5h, usage_1d, usage_7d, window_5h_start, window_1d_start, window_7d_start, extra_quota, extra_quota_used
 		FROM api_keys
 		WHERE id = $1 AND deleted_at IS NULL`,
 		id)
@@ -784,7 +833,7 @@ func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (resu
 		return nil, service.ErrAPIKeyNotFound
 	}
 	data := &service.APIKeyRateLimitData{}
-	if err := rows.Scan(&data.Usage5h, &data.Usage1d, &data.Usage7d, &data.Window5hStart, &data.Window1dStart, &data.Window7dStart); err != nil {
+	if err := rows.Scan(&data.Usage5h, &data.Usage1d, &data.Usage7d, &data.Window5hStart, &data.Window1dStart, &data.Window7dStart, &data.ExtraQuota, &data.ExtraQuotaUsed); err != nil {
 		return nil, err
 	}
 	return data, rows.Err()
@@ -795,29 +844,31 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		return nil
 	}
 	out := &service.APIKey{
-		ID:            m.ID,
-		UserID:        m.UserID,
-		Key:           m.Key,
-		Name:          m.Name,
-		Status:        m.Status,
-		IPWhitelist:   m.IPWhitelist,
-		IPBlacklist:   m.IPBlacklist,
-		LastUsedAt:    m.LastUsedAt,
-		CreatedAt:     m.CreatedAt,
-		UpdatedAt:     m.UpdatedAt,
-		GroupID:       m.GroupID,
-		Quota:         m.Quota,
-		QuotaUsed:     m.QuotaUsed,
-		ExpiresAt:     m.ExpiresAt,
-		RateLimit5h:   m.RateLimit5h,
-		RateLimit1d:   m.RateLimit1d,
-		RateLimit7d:   m.RateLimit7d,
-		Usage5h:       m.Usage5h,
-		Usage1d:       m.Usage1d,
-		Usage7d:       m.Usage7d,
-		Window5hStart: m.Window5hStart,
-		Window1dStart: m.Window1dStart,
-		Window7dStart: m.Window7dStart,
+		ID:             m.ID,
+		UserID:         m.UserID,
+		Key:            m.Key,
+		Name:           m.Name,
+		Status:         m.Status,
+		IPWhitelist:    m.IPWhitelist,
+		IPBlacklist:    m.IPBlacklist,
+		LastUsedAt:     m.LastUsedAt,
+		CreatedAt:      m.CreatedAt,
+		UpdatedAt:      m.UpdatedAt,
+		GroupID:        m.GroupID,
+		Quota:          m.Quota,
+		QuotaUsed:      m.QuotaUsed,
+		ExtraQuota:     m.ExtraQuota,
+		ExtraQuotaUsed: m.ExtraQuotaUsed,
+		ExpiresAt:      m.ExpiresAt,
+		RateLimit5h:    m.RateLimit5h,
+		RateLimit1d:    m.RateLimit1d,
+		RateLimit7d:    m.RateLimit7d,
+		Usage5h:        m.Usage5h,
+		Usage1d:        m.Usage1d,
+		Usage7d:        m.Usage7d,
+		Window5hStart:  m.Window5hStart,
+		Window1dStart:  m.Window1dStart,
+		Window7dStart:  m.Window7dStart,
 	}
 	if m.Edges.User != nil {
 		out.User = userEntityToService(m.Edges.User)

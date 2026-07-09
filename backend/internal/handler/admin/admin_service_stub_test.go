@@ -196,6 +196,34 @@ func (s *stubAdminService) GetUserAPIKeys(ctx context.Context, userID int64, pag
 	return s.apiKeys, int64(len(s.apiKeys)), nil
 }
 
+func (s *stubAdminService) AdminCreateAPIKey(ctx context.Context, userID int64, input *service.AdminCreateAPIKeyInput) (*service.APIKey, error) {
+	keyValue := "sk-generated"
+	if input.CustomKey != nil && strings.TrimSpace(*input.CustomKey) != "" {
+		keyValue = strings.TrimSpace(*input.CustomKey)
+	}
+	now := time.Now().UTC()
+	apiKey := service.APIKey{
+		ID:          int64(100 + len(s.apiKeys)),
+		UserID:      userID,
+		Key:         keyValue,
+		Name:        input.Name,
+		GroupID:     input.GroupID,
+		Status:      service.StatusActive,
+		IPWhitelist: input.IPWhitelist,
+		IPBlacklist: input.IPBlacklist,
+		Quota:       input.Quota,
+		ExtraQuota:  input.ExtraQuota,
+		ExpiresAt:   input.ExpiresAt,
+		RateLimit5h: input.RateLimit5h,
+		RateLimit1d: input.RateLimit1d,
+		RateLimit7d: input.RateLimit7d,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	s.apiKeys = append(s.apiKeys, apiKey)
+	return &apiKey, nil
+}
+
 func (s *stubAdminService) GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error) {
 	return map[string]any{"user_id": userID}, nil
 }
@@ -630,6 +658,60 @@ func (s *stubAdminService) UpdateGroupSortOrders(ctx context.Context, updates []
 	return nil
 }
 
+func (s *stubAdminService) AdminUpdateAPIKey(ctx context.Context, keyID int64, input *service.AdminUpdateAPIKeyInput) (*service.AdminUpdateAPIKeyGroupIDResult, error) {
+	result, err := s.AdminUpdateAPIKeyGroupID(ctx, keyID, input.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range s.apiKeys {
+		if s.apiKeys[i].ID != keyID {
+			continue
+		}
+		if input.Name != nil {
+			s.apiKeys[i].Name = *input.Name
+		}
+		if input.Status != nil {
+			s.apiKeys[i].Status = *input.Status
+		}
+		if input.Quota != nil {
+			s.apiKeys[i].Quota = *input.Quota
+		}
+		if input.ExtraQuota != nil {
+			s.apiKeys[i].ExtraQuota = *input.ExtraQuota
+		}
+		if input.ResetExtraQuota != nil && *input.ResetExtraQuota {
+			s.apiKeys[i].ExtraQuotaUsed = 0
+		}
+		if input.ExpiresAt != nil {
+			s.apiKeys[i].ExpiresAt = input.ExpiresAt
+		}
+		if input.ClearExpiration {
+			s.apiKeys[i].ExpiresAt = nil
+		}
+		if input.RateLimit5h != nil {
+			s.apiKeys[i].RateLimit5h = *input.RateLimit5h
+		}
+		if input.RateLimit1d != nil {
+			s.apiKeys[i].RateLimit1d = *input.RateLimit1d
+		}
+		if input.RateLimit7d != nil {
+			s.apiKeys[i].RateLimit7d = *input.RateLimit7d
+		}
+		if input.ResetRateLimitUsage != nil && *input.ResetRateLimitUsage {
+			s.apiKeys[i].Usage5h = 0
+			s.apiKeys[i].Usage1d = 0
+			s.apiKeys[i].Usage7d = 0
+			s.apiKeys[i].Window5hStart = nil
+			s.apiKeys[i].Window1dStart = nil
+			s.apiKeys[i].Window7dStart = nil
+		}
+		k := s.apiKeys[i]
+		result.APIKey = &k
+		return result, nil
+	}
+	return nil, service.ErrAPIKeyNotFound
+}
+
 func (s *stubAdminService) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*service.AdminUpdateAPIKeyGroupIDResult, error) {
 	for i := range s.apiKeys {
 		if s.apiKeys[i].ID == keyID {
@@ -642,6 +724,7 @@ func (s *stubAdminService) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 					k.GroupID = &gid
 				}
 			}
+			s.apiKeys[i] = k
 			return &service.AdminUpdateAPIKeyGroupIDResult{APIKey: &k}, nil
 		}
 	}

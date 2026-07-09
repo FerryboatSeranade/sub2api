@@ -44,6 +44,7 @@ const (
 	apiKeyLastUsedMinTouch = 30 * time.Second
 	// DB 写失败后的短退避，避免请求路径持续同步重试造成写风暴与高延迟。
 	apiKeyLastUsedFailBackoff = 5 * time.Second
+	defaultAPIKeyPrefix       = "sk-"
 )
 
 type APIKeyRepository interface {
@@ -84,12 +85,14 @@ type APIKeyRepository interface {
 
 // APIKeyRateLimitData holds rate limit usage and window state for an API key.
 type APIKeyRateLimitData struct {
-	Usage5h       float64
-	Usage1d       float64
-	Usage7d       float64
-	Window5hStart *time.Time
-	Window1dStart *time.Time
-	Window7dStart *time.Time
+	Usage5h        float64
+	Usage1d        float64
+	Usage7d        float64
+	Window5hStart  *time.Time
+	Window1dStart  *time.Time
+	Window7dStart  *time.Time
+	ExtraQuota     float64
+	ExtraQuotaUsed float64
 }
 
 // EffectiveUsage5h returns the 5h window usage, or 0 if the window has expired.
@@ -160,6 +163,7 @@ type CreateAPIKeyRequest struct {
 
 	// Quota fields
 	Quota         float64 `json:"quota"`           // Quota limit in USD (0 = unlimited)
+	ExtraQuota    float64 `json:"extra_quota"`     // Extra rate-limit overflow quota in USD (0 = disabled)
 	ExpiresInDays *int    `json:"expires_in_days"` // Days until expiry (nil = never expires)
 
 	// Rate limit fields (0 = unlimited)
@@ -170,17 +174,19 @@ type CreateAPIKeyRequest struct {
 
 // UpdateAPIKeyRequest 更新API Key请求
 type UpdateAPIKeyRequest struct {
-	Name        *string  `json:"name"`
-	GroupID     *int64   `json:"group_id"`
-	Status      *string  `json:"status"`
-	IPWhitelist []string `json:"ip_whitelist"` // IP 白名单（空数组清空）
-	IPBlacklist []string `json:"ip_blacklist"` // IP 黑名单（空数组清空）
+	Name        *string   `json:"name"`
+	GroupID     *int64    `json:"group_id"`
+	Status      *string   `json:"status"`
+	IPWhitelist *[]string `json:"ip_whitelist"` // IP 白名单（nil 不修改，空数组清空）
+	IPBlacklist *[]string `json:"ip_blacklist"` // IP 黑名单（nil 不修改，空数组清空）
 
 	// Quota fields
 	Quota           *float64   `json:"quota"`       // Quota limit in USD (nil = no change, 0 = unlimited)
+	ExtraQuota      *float64   `json:"extra_quota"` // Extra rate-limit overflow quota in USD (nil = no change)
 	ExpiresAt       *time.Time `json:"expires_at"`  // Expiration time (nil = no change)
 	ClearExpiration bool       `json:"-"`           // Clear expiration (internal use)
 	ResetQuota      *bool      `json:"reset_quota"` // Reset quota_used to 0
+	ResetExtraQuota *bool      `json:"reset_extra_quota"`
 
 	// Rate limit fields (nil = no change, 0 = unlimited)
 	RateLimit5h         *float64 `json:"rate_limit_5h"`
@@ -255,6 +261,11 @@ func (s *APIKeyService) compileAPIKeyIPRules(apiKey *APIKey) {
 
 // GenerateKey 生成随机API Key
 func (s *APIKeyService) GenerateKey() (string, error) {
+	prefix := s.cfg.Default.APIKeyPrefix
+	return generateAPIKeyWithPrefix(prefix)
+}
+
+func generateAPIKeyWithPrefix(prefix string) (string, error) {
 	// 生成32字节随机数据
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
@@ -262,9 +273,8 @@ func (s *APIKeyService) GenerateKey() (string, error) {
 	}
 
 	// 转换为十六进制字符串并添加前缀
-	prefix := s.cfg.Default.APIKeyPrefix
 	if prefix == "" {
-		prefix = "sk-"
+		prefix = defaultAPIKeyPrefix
 	}
 
 	key := prefix + hex.EncodeToString(bytes)
@@ -273,6 +283,10 @@ func (s *APIKeyService) GenerateKey() (string, error) {
 
 // ValidateCustomKey 验证自定义API Key格式
 func (s *APIKeyService) ValidateCustomKey(key string) error {
+	return validateCustomAPIKey(key)
+}
+
+func validateCustomAPIKey(key string) error {
 	// 检查长度
 	if len(key) < 16 {
 		return ErrAPIKeyTooShort
@@ -335,6 +349,10 @@ func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group 
 
 // Create 创建API Key
 func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIKeyRequest) (*APIKey, error) {
+	if req.Quota < 0 || req.ExtraQuota < 0 || req.RateLimit5h < 0 || req.RateLimit1d < 0 || req.RateLimit7d < 0 {
+		return nil, infraerrors.BadRequest("API_KEY_LIMIT_INVALID", "quota, extra quota, and rate limits must be non-negative")
+	}
+
 	// 验证用户存在
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -405,18 +423,20 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 
 	// 创建API Key记录
 	apiKey := &APIKey{
-		UserID:      userID,
-		Key:         key,
-		Name:        html.EscapeString(req.Name),
-		GroupID:     req.GroupID,
-		Status:      StatusActive,
-		IPWhitelist: req.IPWhitelist,
-		IPBlacklist: req.IPBlacklist,
-		Quota:       req.Quota,
-		QuotaUsed:   0,
-		RateLimit5h: req.RateLimit5h,
-		RateLimit1d: req.RateLimit1d,
-		RateLimit7d: req.RateLimit7d,
+		UserID:         userID,
+		Key:            key,
+		Name:           html.EscapeString(req.Name),
+		GroupID:        req.GroupID,
+		Status:         StatusActive,
+		IPWhitelist:    req.IPWhitelist,
+		IPBlacklist:    req.IPBlacklist,
+		Quota:          req.Quota,
+		QuotaUsed:      0,
+		ExtraQuota:     req.ExtraQuota,
+		ExtraQuotaUsed: 0,
+		RateLimit5h:    req.RateLimit5h,
+		RateLimit1d:    req.RateLimit1d,
+		RateLimit7d:    req.RateLimit7d,
 	}
 
 	// Set expiration time if specified
@@ -554,6 +574,22 @@ func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, erro
 
 // Update 更新API Key
 func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req UpdateAPIKeyRequest) (*APIKey, error) {
+	if req.Quota != nil && *req.Quota < 0 {
+		return nil, infraerrors.BadRequest("API_KEY_LIMIT_INVALID", "quota must be non-negative")
+	}
+	if req.ExtraQuota != nil && *req.ExtraQuota < 0 {
+		return nil, infraerrors.BadRequest("API_KEY_LIMIT_INVALID", "extra_quota must be non-negative")
+	}
+	if req.RateLimit5h != nil && *req.RateLimit5h < 0 {
+		return nil, infraerrors.BadRequest("API_KEY_LIMIT_INVALID", "rate_limit_5h must be non-negative")
+	}
+	if req.RateLimit1d != nil && *req.RateLimit1d < 0 {
+		return nil, infraerrors.BadRequest("API_KEY_LIMIT_INVALID", "rate_limit_1d must be non-negative")
+	}
+	if req.RateLimit7d != nil && *req.RateLimit7d < 0 {
+		return nil, infraerrors.BadRequest("API_KEY_LIMIT_INVALID", "rate_limit_7d must be non-negative")
+	}
+
 	apiKey, err := s.apiKeyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get api key: %w", err)
@@ -565,15 +601,15 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 
 	// 验证 IP 白名单格式
-	if len(req.IPWhitelist) > 0 {
-		if invalid := ip.ValidateIPPatterns(req.IPWhitelist); len(invalid) > 0 {
+	if req.IPWhitelist != nil && len(*req.IPWhitelist) > 0 {
+		if invalid := ip.ValidateIPPatterns(*req.IPWhitelist); len(invalid) > 0 {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidIPPattern, invalid)
 		}
 	}
 
 	// 验证 IP 黑名单格式
-	if len(req.IPBlacklist) > 0 {
-		if invalid := ip.ValidateIPPatterns(req.IPBlacklist); len(invalid) > 0 {
+	if req.IPBlacklist != nil && len(*req.IPBlacklist) > 0 {
+		if invalid := ip.ValidateIPPatterns(*req.IPBlacklist); len(invalid) > 0 {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidIPPattern, invalid)
 		}
 	}
@@ -625,6 +661,13 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 			apiKey.Status = StatusActive
 		}
 	}
+	if req.ExtraQuota != nil {
+		apiKey.ExtraQuota = *req.ExtraQuota
+	}
+	resetExtraQuota := req.ResetExtraQuota != nil && *req.ResetExtraQuota
+	if resetExtraQuota {
+		apiKey.ExtraQuotaUsed = 0
+	}
 	if req.ClearExpiration {
 		apiKey.ExpiresAt = nil
 		// If clearing expiry and status was expired, reactivate
@@ -639,9 +682,13 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		}
 	}
 
-	// 更新 IP 限制（空数组会清空设置）
-	apiKey.IPWhitelist = req.IPWhitelist
-	apiKey.IPBlacklist = req.IPBlacklist
+	// 更新 IP 限制（nil 不修改，空数组会清空设置）
+	if req.IPWhitelist != nil {
+		apiKey.IPWhitelist = *req.IPWhitelist
+	}
+	if req.IPBlacklist != nil {
+		apiKey.IPBlacklist = *req.IPBlacklist
+	}
 
 	// Update rate limit configuration
 	if req.RateLimit5h != nil {
@@ -670,8 +717,9 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	s.InvalidateAuthCacheByKey(ctx, apiKey.Key)
 	s.compileAPIKeyIPRules(apiKey)
 
-	// Invalidate Redis rate limit cache so reset takes effect immediately
-	if resetRateLimit && s.rateLimitCacheInvalid != nil {
+	// Invalidate Redis rate limit cache so manual limit/usage changes take effect immediately.
+	invalidateRateLimitCache := resetRateLimit || req.ExtraQuota != nil || resetExtraQuota
+	if invalidateRateLimitCache && s.rateLimitCacheInvalid != nil {
 		_ = s.rateLimitCacheInvalid.InvalidateAPIKeyRateLimit(ctx, apiKey.ID)
 	}
 

@@ -75,6 +75,15 @@ func (s *quotaStateCacheStub) SubscribeAuthCacheInvalidation(context.Context, fu
 	return nil
 }
 
+type quotaRateLimitCacheInvalidatorStub struct {
+	ids []int64
+}
+
+func (s *quotaRateLimitCacheInvalidatorStub) InvalidateAPIKeyRateLimit(ctx context.Context, keyID int64) error {
+	s.ids = append(s.ids, keyID)
+	return nil
+}
+
 type quotaBaseAPIKeyRepoStub struct {
 	getByIDCalls int
 }
@@ -197,4 +206,44 @@ func TestAPIKeyService_Update_ReactivatesQuotaExhaustedWhenQuotaUnlimited(t *tes
 	require.Len(t, repo.updatedKeys, 1)
 	require.Equal(t, StatusActive, repo.updatedKeys[0].Status)
 	require.Equal(t, 0.0, repo.updatedKeys[0].Quota)
+}
+
+func TestAPIKeyService_UpdateExtraQuotaAndResetUsage(t *testing.T) {
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{
+			ID:             10,
+			UserID:         7,
+			Key:            "sk-test-extra-quota",
+			Status:         StatusActive,
+			IPWhitelist:    []string{"192.0.2.1"},
+			IPBlacklist:    []string{"198.51.100.0/24"},
+			ExtraQuota:     5,
+			ExtraQuotaUsed: 4.5,
+		},
+	}
+	cache := &quotaStateCacheStub{}
+	rateLimitInvalidator := &quotaRateLimitCacheInvalidatorStub{}
+	svc := &APIKeyService{
+		apiKeyRepo:            repo,
+		cache:                 cache,
+		rateLimitCacheInvalid: rateLimitInvalidator,
+	}
+	extraQuota := 25.0
+	resetExtraQuota := true
+
+	updated, err := svc.Update(context.Background(), 10, 7, UpdateAPIKeyRequest{
+		ExtraQuota:      &extraQuota,
+		ResetExtraQuota: &resetExtraQuota,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 25.0, updated.ExtraQuota)
+	require.Equal(t, 0.0, updated.ExtraQuotaUsed)
+	require.Len(t, repo.updatedKeys, 1)
+	require.Equal(t, 25.0, repo.updatedKeys[0].ExtraQuota)
+	require.Equal(t, 0.0, repo.updatedKeys[0].ExtraQuotaUsed)
+	require.Equal(t, []string{"192.0.2.1"}, repo.updatedKeys[0].IPWhitelist)
+	require.Equal(t, []string{"198.51.100.0/24"}, repo.updatedKeys[0].IPBlacklist)
+	require.Equal(t, []int64{10}, rateLimitInvalidator.ids)
+	require.Equal(t, []string{svc.authCacheKey("sk-test-extra-quota")}, cache.deleteAuthKeys)
 }

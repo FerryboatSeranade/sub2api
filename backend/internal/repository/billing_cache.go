@@ -64,12 +64,14 @@ func billingRateLimitKey(keyID int64) string {
 }
 
 const (
-	rateLimitFieldUsage5h  = "usage_5h"
-	rateLimitFieldUsage1d  = "usage_1d"
-	rateLimitFieldUsage7d  = "usage_7d"
-	rateLimitFieldWindow5h = "window_5h"
-	rateLimitFieldWindow1d = "window_1d"
-	rateLimitFieldWindow7d = "window_7d"
+	rateLimitFieldUsage5h        = "usage_5h"
+	rateLimitFieldUsage1d        = "usage_1d"
+	rateLimitFieldUsage7d        = "usage_7d"
+	rateLimitFieldWindow5h       = "window_5h"
+	rateLimitFieldWindow1d       = "window_1d"
+	rateLimitFieldWindow7d       = "window_7d"
+	rateLimitFieldExtraQuota     = "extra_quota"
+	rateLimitFieldExtraQuotaUsed = "extra_quota_used"
 )
 
 var (
@@ -324,6 +326,12 @@ func (c *billingCache) GetAPIKeyRateLimit(ctx context.Context, keyID int64) (*se
 	if v, ok := result[rateLimitFieldWindow7d]; ok {
 		data.Window7d, _ = strconv.ParseInt(v, 10, 64)
 	}
+	if v, ok := result[rateLimitFieldExtraQuota]; ok {
+		data.ExtraQuota, _ = strconv.ParseFloat(v, 64)
+	}
+	if v, ok := result[rateLimitFieldExtraQuotaUsed]; ok {
+		data.ExtraQuotaUsed, _ = strconv.ParseFloat(v, 64)
+	}
 	return data, nil
 }
 
@@ -333,12 +341,14 @@ func (c *billingCache) SetAPIKeyRateLimit(ctx context.Context, keyID int64, data
 	}
 	key := billingRateLimitKey(keyID)
 	fields := map[string]any{
-		rateLimitFieldUsage5h:  data.Usage5h,
-		rateLimitFieldUsage1d:  data.Usage1d,
-		rateLimitFieldUsage7d:  data.Usage7d,
-		rateLimitFieldWindow5h: data.Window5h,
-		rateLimitFieldWindow1d: data.Window1d,
-		rateLimitFieldWindow7d: data.Window7d,
+		rateLimitFieldUsage5h:        data.Usage5h,
+		rateLimitFieldUsage1d:        data.Usage1d,
+		rateLimitFieldUsage7d:        data.Usage7d,
+		rateLimitFieldWindow5h:       data.Window5h,
+		rateLimitFieldWindow1d:       data.Window1d,
+		rateLimitFieldWindow7d:       data.Window7d,
+		rateLimitFieldExtraQuota:     data.ExtraQuota,
+		rateLimitFieldExtraQuotaUsed: data.ExtraQuotaUsed,
 	}
 	pipe := c.rdb.Pipeline()
 	pipe.HSet(ctx, key, fields)

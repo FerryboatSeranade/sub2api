@@ -573,6 +573,15 @@ func (s *BillingCacheService) InvalidateAPIKeyRateLimit(ctx context.Context, key
 // resets expired windows in-memory and triggers async DB reset,
 // and returns an error if any window limit is exceeded.
 func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey *APIKey) error {
+	if apiKey.ExtraQuota > 0 && s.apiKeyRateLimitLoader != nil {
+		data, err := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
+		if err != nil {
+			return nil // Don't block requests on DB errors
+		}
+		return s.evaluateRateLimits(ctx, apiKey, data.Usage5h, data.Usage1d, data.Usage7d,
+			data.Window5hStart, data.Window1dStart, data.Window7dStart, data.ExtraQuotaUsed)
+	}
+
 	if s.cache == nil {
 		// No cache: fall back to reading from DB directly
 		if s.apiKeyRateLimitLoader == nil {
@@ -583,7 +592,7 @@ func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey 
 			return nil // Don't block requests on DB errors
 		}
 		return s.evaluateRateLimits(ctx, apiKey, data.Usage5h, data.Usage1d, data.Usage7d,
-			data.Window5hStart, data.Window1dStart, data.Window7dStart)
+			data.Window5hStart, data.Window1dStart, data.Window7dStart, data.ExtraQuotaUsed)
 	}
 
 	cacheData, err := s.cache.GetAPIKeyRateLimit(ctx, apiKey.ID)
@@ -598,9 +607,11 @@ func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey 
 		}
 		// Build cache entry from DB data
 		cacheEntry := &APIKeyRateLimitCacheData{
-			Usage5h: dbData.Usage5h,
-			Usage1d: dbData.Usage1d,
-			Usage7d: dbData.Usage7d,
+			Usage5h:        dbData.Usage5h,
+			Usage1d:        dbData.Usage1d,
+			Usage7d:        dbData.Usage7d,
+			ExtraQuota:     dbData.ExtraQuota,
+			ExtraQuotaUsed: dbData.ExtraQuotaUsed,
 		}
 		if dbData.Window5hStart != nil {
 			cacheEntry.Window5h = dbData.Window5hStart.Unix()
@@ -628,11 +639,11 @@ func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey 
 		t := time.Unix(cacheData.Window7d, 0)
 		w7d = &t
 	}
-	return s.evaluateRateLimits(ctx, apiKey, cacheData.Usage5h, cacheData.Usage1d, cacheData.Usage7d, w5h, w1d, w7d)
+	return s.evaluateRateLimits(ctx, apiKey, cacheData.Usage5h, cacheData.Usage1d, cacheData.Usage7d, w5h, w1d, w7d, cacheData.ExtraQuotaUsed)
 }
 
 // evaluateRateLimits checks usage against limits, triggering async resets for expired windows.
-func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *APIKey, usage5h, usage1d, usage7d float64, w5h, w1d, w7d *time.Time) error {
+func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *APIKey, usage5h, usage1d, usage7d float64, w5h, w1d, w7d *time.Time, extraQuotaUsed float64) error {
 	needsReset := false
 
 	// Reset expired windows in-memory for check purposes
@@ -674,17 +685,23 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 		}()
 	}
 
-	// Check limits
+	var limitErr error
 	if apiKey.RateLimit5h > 0 && usage5h >= apiKey.RateLimit5h {
-		return ErrAPIKeyRateLimit5hExceeded
+		limitErr = ErrAPIKeyRateLimit5hExceeded
 	}
-	if apiKey.RateLimit1d > 0 && usage1d >= apiKey.RateLimit1d {
-		return ErrAPIKeyRateLimit1dExceeded
+	if limitErr == nil && apiKey.RateLimit1d > 0 && usage1d >= apiKey.RateLimit1d {
+		limitErr = ErrAPIKeyRateLimit1dExceeded
 	}
-	if apiKey.RateLimit7d > 0 && usage7d >= apiKey.RateLimit7d {
-		return ErrAPIKeyRateLimit7dExceeded
+	if limitErr == nil && apiKey.RateLimit7d > 0 && usage7d >= apiKey.RateLimit7d {
+		limitErr = ErrAPIKeyRateLimit7dExceeded
 	}
-	return nil
+	if limitErr == nil {
+		return nil
+	}
+	if apiKey.ExtraQuota > 0 && extraQuotaUsed < apiKey.ExtraQuota {
+		return nil
+	}
+	return limitErr
 }
 
 // QueueUpdateAPIKeyRateLimitUsage asynchronously updates rate limit usage in the cache.

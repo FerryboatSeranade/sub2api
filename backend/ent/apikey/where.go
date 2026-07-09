@@ -110,6 +110,16 @@ func QuotaUsed(v float64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldQuotaUsed, v))
 }
 
+// ExtraQuota applies equality check predicate on the "extra_quota" field. It's identical to ExtraQuotaEQ.
+func ExtraQuota(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldExtraQuota, v))
+}
+
+// ExtraQuotaUsed applies equality check predicate on the "extra_quota_used" field. It's identical to ExtraQuotaUsedEQ.
+func ExtraQuotaUsed(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldExtraQuotaUsed, v))
+}
+
 // ExpiresAt applies equality check predicate on the "expires_at" field. It's identical to ExpiresAtEQ.
 func ExpiresAt(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldExpiresAt, v))
@@ -683,6 +693,86 @@ func QuotaUsedLT(v float64) predicate.APIKey {
 // QuotaUsedLTE applies the LTE predicate on the "quota_used" field.
 func QuotaUsedLTE(v float64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldLTE(FieldQuotaUsed, v))
+}
+
+// ExtraQuotaEQ applies the EQ predicate on the "extra_quota" field.
+func ExtraQuotaEQ(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldExtraQuota, v))
+}
+
+// ExtraQuotaNEQ applies the NEQ predicate on the "extra_quota" field.
+func ExtraQuotaNEQ(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldExtraQuota, v))
+}
+
+// ExtraQuotaIn applies the In predicate on the "extra_quota" field.
+func ExtraQuotaIn(vs ...float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldExtraQuota, vs...))
+}
+
+// ExtraQuotaNotIn applies the NotIn predicate on the "extra_quota" field.
+func ExtraQuotaNotIn(vs ...float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldExtraQuota, vs...))
+}
+
+// ExtraQuotaGT applies the GT predicate on the "extra_quota" field.
+func ExtraQuotaGT(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldExtraQuota, v))
+}
+
+// ExtraQuotaGTE applies the GTE predicate on the "extra_quota" field.
+func ExtraQuotaGTE(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldExtraQuota, v))
+}
+
+// ExtraQuotaLT applies the LT predicate on the "extra_quota" field.
+func ExtraQuotaLT(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldExtraQuota, v))
+}
+
+// ExtraQuotaLTE applies the LTE predicate on the "extra_quota" field.
+func ExtraQuotaLTE(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldExtraQuota, v))
+}
+
+// ExtraQuotaUsedEQ applies the EQ predicate on the "extra_quota_used" field.
+func ExtraQuotaUsedEQ(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldExtraQuotaUsed, v))
+}
+
+// ExtraQuotaUsedNEQ applies the NEQ predicate on the "extra_quota_used" field.
+func ExtraQuotaUsedNEQ(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldExtraQuotaUsed, v))
+}
+
+// ExtraQuotaUsedIn applies the In predicate on the "extra_quota_used" field.
+func ExtraQuotaUsedIn(vs ...float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldExtraQuotaUsed, vs...))
+}
+
+// ExtraQuotaUsedNotIn applies the NotIn predicate on the "extra_quota_used" field.
+func ExtraQuotaUsedNotIn(vs ...float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldExtraQuotaUsed, vs...))
+}
+
+// ExtraQuotaUsedGT applies the GT predicate on the "extra_quota_used" field.
+func ExtraQuotaUsedGT(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldExtraQuotaUsed, v))
+}
+
+// ExtraQuotaUsedGTE applies the GTE predicate on the "extra_quota_used" field.
+func ExtraQuotaUsedGTE(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldExtraQuotaUsed, v))
+}
+
+// ExtraQuotaUsedLT applies the LT predicate on the "extra_quota_used" field.
+func ExtraQuotaUsedLT(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldExtraQuotaUsed, v))
+}
+
+// ExtraQuotaUsedLTE applies the LTE predicate on the "extra_quota_used" field.
+func ExtraQuotaUsedLTE(v float64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldExtraQuotaUsed, v))
 }
 
 // ExpiresAtEQ applies the EQ predicate on the "expires_at" field.

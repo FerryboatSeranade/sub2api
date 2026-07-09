@@ -50,6 +50,8 @@ type AdminService interface {
 	UpdateGroupSortOrders(ctx context.Context, updates []GroupSortOrderUpdate) error
 
 	// API Key management (admin)
+	AdminCreateAPIKey(ctx context.Context, userID int64, input *AdminCreateAPIKeyInput) (*APIKey, error)
+	AdminUpdateAPIKey(ctx context.Context, keyID int64, input *AdminUpdateAPIKeyInput) (*AdminUpdateAPIKeyGroupIDResult, error)
 	AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error)
 	AdminResetAPIKeyRateLimitUsage(ctx context.Context, keyID int64) (*APIKey, error)
 
@@ -364,6 +366,43 @@ type BulkUpdateAccountResult struct {
 	AccountID int64  `json:"account_id"`
 	Success   bool   `json:"success"`
 	Error     string `json:"error,omitempty"`
+}
+
+// AdminCreateAPIKeyInput describes an admin-created API key for a target user.
+type AdminCreateAPIKeyInput struct {
+	Name          string
+	GroupID       *int64
+	CustomKey     *string
+	IPWhitelist   []string
+	IPBlacklist   []string
+	Quota         float64
+	ExtraQuota    float64
+	ExpiresAt     *time.Time
+	ExpiresInDays *int
+	RateLimit5h   float64
+	RateLimit1d   float64
+	RateLimit7d   float64
+}
+
+// AdminUpdateAPIKeyInput describes admin-managed updates for an existing API key.
+type AdminUpdateAPIKeyInput struct {
+	Name        *string
+	GroupID     *int64
+	Status      *string
+	IPWhitelist *[]string
+	IPBlacklist *[]string
+
+	Quota           *float64
+	ExtraQuota      *float64
+	ExpiresAt       *time.Time
+	ClearExpiration bool
+	ResetQuota      *bool
+	ResetExtraQuota *bool
+
+	RateLimit5h         *float64
+	RateLimit1d         *float64
+	RateLimit7d         *float64
+	ResetRateLimitUsage *bool
 }
 
 // AdminUpdateAPIKeyGroupIDResult is the result of AdminUpdateAPIKeyGroupID.

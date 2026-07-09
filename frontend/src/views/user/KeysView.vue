@@ -183,10 +183,10 @@
             </span>
           </template>
 
-          <template #cell-usage="{ row }">
-            <div class="text-sm">
-              <div class="flex items-center gap-1.5">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
+	          <template #cell-usage="{ row }">
+	            <div class="text-sm">
+	              <div class="flex items-center gap-1.5">
+	                <span class="text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
                 <span class="font-medium text-gray-900 dark:text-white">
                   ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
                 </span>
@@ -195,15 +195,15 @@
                 <span class="text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
                 <span class="font-medium text-gray-900 dark:text-white">
                   ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
-                </span>
-              </div>
-              <!-- Quota progress (if quota is set) -->
-              <div v-if="row.quota > 0" class="mt-1.5">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('keys.quota') }}:</span>
-                  <span :class="[
-                    'font-medium',
-                    row.quota_used >= row.quota ? 'text-red-500' :
+	                </span>
+	              </div>
+	              <!-- Quota progress (if quota is set) -->
+	              <div v-if="row.quota > 0" class="mt-1.5">
+	                <div class="flex items-center gap-1.5">
+	                  <span class="text-gray-500 dark:text-gray-400">{{ t('keys.quota') }}:</span>
+	                  <span :class="[
+	                    'font-medium',
+	                    row.quota_used >= row.quota ? 'text-red-500' :
                     row.quota_used >= row.quota * 0.8 ? 'text-yellow-500' :
                     'text-gray-900 dark:text-white'
                   ]">
@@ -216,14 +216,39 @@
                       'h-full rounded-full transition-all',
                       row.quota_used >= row.quota ? 'bg-red-500' :
                       row.quota_used >= row.quota * 0.8 ? 'bg-yellow-500' :
-                      'bg-primary-500'
-                    ]"
-                    :style="{ width: Math.min((row.quota_used / row.quota) * 100, 100) + '%' }"
-                  />
-                </div>
-              </div>
-            </div>
-          </template>
+	                      'bg-primary-500'
+	                    ]"
+	                    :style="{ width: Math.min((row.quota_used / row.quota) * 100, 100) + '%' }"
+	                  />
+	                </div>
+	              </div>
+	              <!-- Extra rate-limit overflow quota (if set) -->
+	              <div v-if="row.extra_quota > 0" class="mt-1.5">
+	                <div class="flex items-center gap-1.5">
+	                  <span class="text-gray-500 dark:text-gray-400">{{ t('keys.extraQuota') }}:</span>
+	                  <span :class="[
+	                    'font-medium',
+	                    row.extra_quota_used >= row.extra_quota ? 'text-red-500' :
+	                    row.extra_quota_used >= row.extra_quota * 0.8 ? 'text-yellow-500' :
+	                    'text-gray-900 dark:text-white'
+	                  ]">
+	                    ${{ row.extra_quota_used?.toFixed(2) || '0.00' }} / ${{ row.extra_quota?.toFixed(2) }}
+	                  </span>
+	                </div>
+	                <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
+	                  <div
+	                    :class="[
+	                      'h-full rounded-full transition-all',
+	                      row.extra_quota_used >= row.extra_quota ? 'bg-red-500' :
+	                      row.extra_quota_used >= row.extra_quota * 0.8 ? 'bg-yellow-500' :
+	                      'bg-cyan-500'
+	                    ]"
+	                    :style="{ width: Math.min((row.extra_quota_used / row.extra_quota) * 100, 100) + '%' }"
+	                  />
+	                </div>
+	              </div>
+	            </div>
+	          </template>
 
           <template #cell-rate_limit="{ row }">
             <div v-if="row.rate_limit_5h > 0 || row.rate_limit_1d > 0 || row.rate_limit_7d > 0" class="space-y-1.5 min-w-[140px]">
@@ -615,47 +640,94 @@
           </div>
           -->
 
-          <div class="space-y-4">
-            <div>
-              <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
-                <input
-                  v-model.number="formData.quota"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  class="input pl-7"
-                  :placeholder="t('keys.quotaAmountPlaceholder')"
-                />
-              </div>
-              <p class="input-hint">{{ t('keys.quotaAmountHint') }}</p>
-            </div>
+	          <div class="space-y-4">
+	            <div>
+	              <div class="relative">
+	                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+	                <input
+	                  v-model.number="formData.quota"
+	                  type="number"
+	                  step="0.01"
+	                  min="0"
+	                  class="input pl-7"
+	                  :placeholder="t('keys.quotaAmountPlaceholder')"
+	                />
+	              </div>
+	              <p class="input-hint">{{ t('keys.quotaAmountHint') }}</p>
+	            </div>
 
-            <!-- Quota used display (only in edit mode) -->
-            <div v-if="showEditModal && selectedKey && selectedKey.quota > 0">
-              <label class="input-label">{{ t('keys.quotaUsed') }}</label>
-              <div class="flex items-center gap-2">
-                <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700">
+	            <div>
+	              <label class="input-label">{{ t('keys.extraQuotaLimit') }}</label>
+	              <div class="relative">
+	                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+	                <input
+	                  v-model.number="formData.extra_quota"
+	                  type="number"
+	                  step="0.01"
+	                  min="0"
+	                  class="input pl-7"
+	                  :placeholder="t('keys.extraQuotaAmountPlaceholder')"
+	                />
+	              </div>
+	              <p class="input-hint">{{ t('keys.extraQuotaAmountHint') }}</p>
+	            </div>
+
+	            <!-- Quota used display (only in edit mode) -->
+	            <div v-if="showEditModal && selectedKey && selectedKey.quota > 0">
+	              <label class="input-label">{{ t('keys.quotaUsed') }}</label>
+	              <div class="flex items-center gap-2">
+	                <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700">
                   <span class="font-medium text-gray-900 dark:text-white">
                     ${{ selectedKey.quota_used?.toFixed(4) || '0.0000' }}
                   </span>
                   <span class="mx-2 text-gray-400">/</span>
                   <span class="text-gray-500 dark:text-gray-400">
-                    ${{ selectedKey.quota?.toFixed(2) || '0.00' }}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  @click="confirmResetQuota"
-                  class="btn btn-secondary text-sm"
-                  :title="t('keys.resetQuotaUsed')"
-                >
-                  {{ t('keys.reset') }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+	                    ${{ selectedKey.quota?.toFixed(2) || '0.00' }}
+	                  </span>
+	                </div>
+	                <button
+	                  type="button"
+	                  @click="confirmResetQuota"
+	                  class="btn btn-secondary text-sm"
+	                  :title="t('keys.resetQuotaUsed')"
+	                  :aria-label="t('keys.resetQuotaUsed')"
+	                >
+	                  {{ t('keys.reset') }}
+	                </button>
+	              </div>
+	            </div>
+
+	            <!-- Extra quota used display (only in edit mode) -->
+	            <div v-if="showEditModal && selectedKey && selectedKey.extra_quota > 0">
+	              <label class="input-label">{{ t('keys.extraQuotaUsed') }}</label>
+	              <div class="flex items-center gap-2">
+	                <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700">
+	                  <span :class="[
+	                    'font-medium',
+	                    selectedKey.extra_quota_used >= selectedKey.extra_quota ? 'text-red-500' :
+	                    selectedKey.extra_quota_used >= selectedKey.extra_quota * 0.8 ? 'text-yellow-500' :
+	                    'text-gray-900 dark:text-white'
+	                  ]">
+	                    ${{ selectedKey.extra_quota_used?.toFixed(4) || '0.0000' }}
+	                  </span>
+	                  <span class="mx-2 text-gray-400">/</span>
+	                  <span class="text-gray-500 dark:text-gray-400">
+	                    ${{ selectedKey.extra_quota?.toFixed(2) || '0.00' }}
+	                  </span>
+	                </div>
+	                <button
+	                  type="button"
+	                  @click="confirmResetExtraQuota"
+	                  class="btn btn-secondary text-sm"
+	                  :title="t('keys.resetExtraQuotaUsed')"
+	                  :aria-label="t('keys.resetExtraQuotaUsed')"
+	                >
+	                  {{ t('keys.reset') }}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
 
         <!-- Rate Limit Section -->
         <div class="space-y-3">
@@ -818,16 +890,18 @@
               </div>
             </div>
 
-            <!-- Reset Rate Limit button (edit mode only) -->
-            <div v-if="showEditModal && selectedKey && (selectedKey.rate_limit_5h > 0 || selectedKey.rate_limit_1d > 0 || selectedKey.rate_limit_7d > 0)">
-              <button
-                type="button"
-                @click="confirmResetRateLimit"
-                class="btn btn-secondary text-sm"
-              >
-                {{ t('keys.resetRateLimitUsage') }}
-              </button>
-            </div>
+	            <!-- Reset Rate Limit button (edit mode only) -->
+	            <div v-if="showEditModal && selectedKey && (selectedKey.rate_limit_5h > 0 || selectedKey.rate_limit_1d > 0 || selectedKey.rate_limit_7d > 0)">
+	              <button
+	                type="button"
+	                @click="confirmResetRateLimit"
+	                class="btn btn-secondary text-sm"
+	                :title="t('keys.resetRateLimitUsage')"
+	                :aria-label="t('keys.resetRateLimitUsage')"
+	              >
+	                {{ t('keys.resetRateLimitUsage') }}
+	              </button>
+	            </div>
           </div>
         </div>
 
@@ -970,19 +1044,31 @@
       :danger="true"
       @confirm="resetQuotaUsed"
       @cancel="showResetQuotaDialog = false"
-    />
+	    />
 
-    <!-- Reset Rate Limit Confirmation Dialog -->
-    <ConfirmDialog
-      :show="showResetRateLimitDialog"
-      :title="t('keys.resetRateLimitTitle')"
-      :message="t('keys.resetRateLimitConfirmMessage', { name: selectedKey?.name })"
-      :confirm-text="t('keys.reset')"
-      :cancel-text="t('common.cancel')"
-      :danger="true"
-      @confirm="resetRateLimitUsage"
-      @cancel="showResetRateLimitDialog = false"
-    />
+	    <!-- Reset Rate Limit Confirmation Dialog -->
+	    <ConfirmDialog
+	      :show="showResetRateLimitDialog"
+	      :title="t('keys.resetRateLimitTitle')"
+	      :message="t('keys.resetRateLimitConfirmMessage', { name: selectedKey?.name })"
+	      :confirm-text="t('keys.reset')"
+	      :cancel-text="t('common.cancel')"
+	      :danger="true"
+	      @confirm="resetRateLimitUsage"
+	      @cancel="showResetRateLimitDialog = false"
+	    />
+
+	    <!-- Reset Extra Quota Confirmation Dialog -->
+	    <ConfirmDialog
+	      :show="showResetExtraQuotaDialog"
+	      :title="t('keys.resetExtraQuotaTitle')"
+	      :message="t('keys.resetExtraQuotaConfirmMessage', { name: selectedKey?.name, used: selectedKey?.extra_quota_used?.toFixed(4) })"
+	      :confirm-text="t('keys.reset')"
+	      :cancel-text="t('common.cancel')"
+	      :danger="true"
+	      @confirm="resetExtraQuotaUsed"
+	      @cancel="showResetExtraQuotaDialog = false"
+	    />
 
     <!-- Use Key Modal -->
     <UseKeyModal
@@ -1293,6 +1379,7 @@ const showEditModal = ref(false)
 const showDeleteDialog = ref(false)
 const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
+const showResetExtraQuotaDialog = ref(false)
 const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
 const showColumnDropdown = ref(false)
@@ -1324,17 +1411,18 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 const formData = ref({
   name: '',
   group_id: null as number | null,
-  status: 'active' as 'active' | 'inactive',
+  status: 'active' as 'active' | 'inactive' | 'disabled',
   use_custom_key: false,
   custom_key: '',
-  enable_ip_restriction: false,
-  ip_whitelist: '',
-  ip_blacklist: '',
-  // Quota settings (empty = unlimited)
-  enable_quota: false,
-  quota: null as number | null,
-  // Rate limit settings
-  enable_rate_limit: false,
+	  enable_ip_restriction: false,
+	  ip_whitelist: '',
+	  ip_blacklist: '',
+	  // Quota settings (empty = unlimited)
+	  enable_quota: false,
+	  quota: null as number | null,
+	  extra_quota: null as number | null,
+	  // Rate limit settings
+	  enable_rate_limit: false,
   rate_limit_5h: null as number | null,
   rate_limit_1d: null as number | null,
   rate_limit_7d: null as number | null,
@@ -1561,12 +1649,13 @@ const editKey = (key: ApiKey) => {
     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
     use_custom_key: false,
     custom_key: '',
-    enable_ip_restriction: hasIPRestriction,
-    ip_whitelist: (key.ip_whitelist || []).join('\n'),
-    ip_blacklist: (key.ip_blacklist || []).join('\n'),
-    enable_quota: key.quota > 0,
-    quota: key.quota > 0 ? key.quota : null,
-    enable_rate_limit: (key.rate_limit_5h > 0) || (key.rate_limit_1d > 0) || (key.rate_limit_7d > 0),
+	    enable_ip_restriction: hasIPRestriction,
+	    ip_whitelist: (key.ip_whitelist || []).join('\n'),
+	    ip_blacklist: (key.ip_blacklist || []).join('\n'),
+	    enable_quota: key.quota > 0,
+	    quota: key.quota > 0 ? key.quota : null,
+	    extra_quota: key.extra_quota > 0 ? key.extra_quota : null,
+	    enable_rate_limit: (key.rate_limit_5h > 0) || (key.rate_limit_1d > 0) || (key.rate_limit_7d > 0),
     rate_limit_5h: key.rate_limit_5h || null,
     rate_limit_1d: key.rate_limit_1d || null,
     rate_limit_7d: key.rate_limit_7d || null,
@@ -1677,8 +1766,9 @@ const handleSubmit = async () => {
   const ipWhitelist = formData.value.enable_ip_restriction ? parseIPList(formData.value.ip_whitelist) : []
   const ipBlacklist = formData.value.enable_ip_restriction ? parseIPList(formData.value.ip_blacklist) : []
 
-  // Calculate quota value (null/empty/0 = unlimited, stored as 0)
-  const quota = formData.value.quota && formData.value.quota > 0 ? formData.value.quota : 0
+	  // Calculate quota value (null/empty/0 = unlimited, stored as 0)
+	  const quota = formData.value.quota && formData.value.quota > 0 ? formData.value.quota : 0
+	  const extraQuota = formData.value.extra_quota && formData.value.extra_quota > 0 ? formData.value.extra_quota : 0
 
   // Calculate expiration
   let expiresInDays: number | undefined
@@ -1710,18 +1800,20 @@ const handleSubmit = async () => {
   try {
     if (showEditModal.value && selectedKey.value) {
       const updates: UpdateApiKeyRequest = {
-        name: formData.value.name,
-        group_id: formData.value.group_id,
-        ip_whitelist: ipWhitelist,
-        ip_blacklist: ipBlacklist,
-        quota: quota,
-        expires_at: expiresAt,
+	        name: formData.value.name,
+	        group_id: formData.value.group_id,
+	        ip_whitelist: ipWhitelist,
+	        ip_blacklist: ipBlacklist,
+	        quota: quota,
+	        extra_quota: extraQuota,
+	        expires_at: expiresAt,
         rate_limit_5h: rateLimitData.rate_limit_5h,
         rate_limit_1d: rateLimitData.rate_limit_1d,
         rate_limit_7d: rateLimitData.rate_limit_7d,
       }
-      if (shouldSubmitEditStatus(selectedKey.value, formData.value.status)) {
-        updates.status = formData.value.status
+      const editStatus = formData.value.status === 'disabled' ? 'inactive' : formData.value.status
+      if (shouldSubmitEditStatus(selectedKey.value, editStatus)) {
+        updates.status = editStatus
       }
       await keysAPI.update(selectedKey.value.id, updates)
       appStore.showSuccess(t('keys.keyUpdatedSuccess'))
@@ -1729,14 +1821,15 @@ const handleSubmit = async () => {
       const customKey = formData.value.use_custom_key ? formData.value.custom_key : undefined
       await keysAPI.create(
         formData.value.name,
-        formData.value.group_id,
-        customKey,
-        ipWhitelist,
-        ipBlacklist,
-        quota,
-        expiresInDays,
-        rateLimitData
-      )
+	        formData.value.group_id,
+	        customKey,
+	        ipWhitelist,
+	        ipBlacklist,
+	        quota,
+	        extraQuota,
+	        expiresInDays,
+	        rateLimitData
+	      )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
       if (onboardingStore.isCurrentStep('[data-tour="key-form-submit"]')) {
@@ -1784,12 +1877,13 @@ const closeModals = () => {
     status: 'active',
     use_custom_key: false,
     custom_key: '',
-    enable_ip_restriction: false,
-    ip_whitelist: '',
-    ip_blacklist: '',
-    enable_quota: false,
-    quota: null,
-    enable_rate_limit: false,
+	    enable_ip_restriction: false,
+	    ip_whitelist: '',
+	    ip_blacklist: '',
+	    enable_quota: false,
+	    quota: null,
+	    extra_quota: null,
+	    enable_rate_limit: false,
     rate_limit_5h: null,
     rate_limit_1d: null,
     rate_limit_7d: null,
@@ -1802,6 +1896,10 @@ const closeModals = () => {
 // Show reset quota confirmation dialog
 const confirmResetQuota = () => {
   showResetQuotaDialog.value = true
+}
+
+const confirmResetExtraQuota = () => {
+  showResetExtraQuotaDialog.value = true
 }
 
 // Set expiration date based on quick select days
@@ -1856,6 +1954,23 @@ const resetRateLimitUsage = async () => {
     }
   } catch (error: any) {
     const errorMsg = error.response?.data?.detail || t('keys.failedToResetRateLimit')
+    appStore.showError(errorMsg)
+  }
+}
+
+const resetExtraQuotaUsed = async () => {
+  if (!selectedKey.value) return
+  showResetExtraQuotaDialog.value = false
+  try {
+    await keysAPI.update(selectedKey.value.id, { reset_extra_quota: true })
+    appStore.showSuccess(t('keys.extraQuotaResetSuccess'))
+    await loadApiKeys()
+    const refreshedKey = apiKeys.value.find(k => k.id === selectedKey.value!.id)
+    if (refreshedKey) {
+      selectedKey.value = refreshedKey
+    }
+  } catch (error: any) {
+    const errorMsg = error.response?.data?.detail || t('keys.failedToResetExtraQuota')
     appStore.showError(errorMsg)
   }
 }

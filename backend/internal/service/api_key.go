@@ -48,9 +48,11 @@ type APIKey struct {
 	CurrentConcurrency  int
 
 	// Quota fields
-	Quota     float64    // Quota limit in USD (0 = unlimited)
-	QuotaUsed float64    // Used quota amount
-	ExpiresAt *time.Time // Expiration time (nil = never expires)
+	Quota          float64    // Quota limit in USD (0 = unlimited)
+	QuotaUsed      float64    // Used quota amount
+	ExtraQuota     float64    // Extra rate-limit overflow quota in USD (0 = disabled)
+	ExtraQuotaUsed float64    // Used extra rate-limit overflow quota amount
+	ExpiresAt      *time.Time // Expiration time (nil = never expires)
 
 	// Rate limit fields
 	RateLimit5h   float64    // Rate limit in USD per 5h (0 = unlimited)
@@ -95,6 +97,18 @@ func (k *APIKey) GetQuotaRemaining() float64 {
 		return -1 // unlimited
 	}
 	remaining := k.Quota - k.QuotaUsed
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// GetExtraQuotaRemaining returns remaining extra quota (-1 when extra quota is disabled).
+func (k *APIKey) GetExtraQuotaRemaining() float64 {
+	if k.ExtraQuota <= 0 {
+		return -1
+	}
+	remaining := k.ExtraQuota - k.ExtraQuotaUsed
 	if remaining < 0 {
 		return 0
 	}

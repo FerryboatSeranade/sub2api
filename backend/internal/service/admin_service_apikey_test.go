@@ -23,6 +23,7 @@ type userRepoStubForGroupUpdate struct {
 	addGroupCalled bool
 	addedUserID    int64
 	addedGroupID   int64
+	user           *User
 }
 
 func (s *userRepoStubForGroupUpdate) AddGroupToAllowedGroups(_ context.Context, userID int64, groupID int64) error {
@@ -33,8 +34,15 @@ func (s *userRepoStubForGroupUpdate) AddGroupToAllowedGroups(_ context.Context, 
 }
 
 func (s *userRepoStubForGroupUpdate) Create(context.Context, *User) error { panic("unexpected") }
-func (s *userRepoStubForGroupUpdate) GetByID(context.Context, int64) (*User, error) {
-	panic("unexpected")
+func (s *userRepoStubForGroupUpdate) GetByID(_ context.Context, id int64) (*User, error) {
+	if s.user == nil {
+		panic("unexpected")
+	}
+	if s.user.ID != id {
+		return nil, ErrUserNotFound
+	}
+	clone := *s.user
+	return &clone, nil
 }
 func (s *userRepoStubForGroupUpdate) GetByEmail(context.Context, string) (*User, error) {
 	panic("unexpected")
@@ -116,6 +124,8 @@ type apiKeyRepoStubForGroupUpdate struct {
 	getErr    error
 	updateErr error
 	updated   *APIKey // captures what was passed to Update
+	created   *APIKey
+	exists    bool
 }
 
 func (s *apiKeyRepoStubForGroupUpdate) GetByID(_ context.Context, _ int64) (*APIKey, error) {
@@ -134,8 +144,21 @@ func (s *apiKeyRepoStubForGroupUpdate) Update(_ context.Context, key *APIKey) er
 	return nil
 }
 
-// Unused methods – panic on unexpected call.
-func (s *apiKeyRepoStubForGroupUpdate) Create(context.Context, *APIKey) error { panic("unexpected") }
+func (s *apiKeyRepoStubForGroupUpdate) Create(_ context.Context, key *APIKey) error {
+	clone := *key
+	if clone.ID == 0 {
+		clone.ID = 100
+	}
+	if clone.CreatedAt.IsZero() {
+		clone.CreatedAt = time.Now().UTC()
+	}
+	if clone.UpdatedAt.IsZero() {
+		clone.UpdatedAt = clone.CreatedAt
+	}
+	*key = clone
+	s.created = &clone
+	return nil
+}
 func (s *apiKeyRepoStubForGroupUpdate) GetKeyAndOwnerID(context.Context, int64) (string, int64, error) {
 	panic("unexpected")
 }
@@ -159,7 +182,7 @@ func (s *apiKeyRepoStubForGroupUpdate) CountByUserID(context.Context, int64) (in
 	panic("unexpected")
 }
 func (s *apiKeyRepoStubForGroupUpdate) ExistsByKey(context.Context, string) (bool, error) {
-	panic("unexpected")
+	return s.exists, nil
 }
 func (s *apiKeyRepoStubForGroupUpdate) ListByGroupID(context.Context, int64, pagination.PaginationParams) ([]APIKey, *pagination.PaginationResult, error) {
 	panic("unexpected")
@@ -281,6 +304,75 @@ func (s *userSubRepoStubForGroupUpdate) GetActiveByUserIDAndGroupID(_ context.Co
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+func TestAdminService_AdminCreateAPIKey_CustomKeyExactExpiryAndLimits(t *testing.T) {
+	expiresAt := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	customKey := "sk_custom_1234567890"
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{}
+	userRepo := &userRepoStubForGroupUpdate{user: &User{ID: 42, Email: "user@example.com", Status: StatusActive}}
+	cache := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, userRepo: userRepo, authCacheInvalidator: cache}
+
+	got, err := svc.AdminCreateAPIKey(context.Background(), 42, &AdminCreateAPIKeyInput{
+		Name:        "Customer Key",
+		CustomKey:   &customKey,
+		Quota:       100,
+		ExpiresAt:   &expiresAt,
+		RateLimit5h: 5,
+		RateLimit7d: 50,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, int64(42), got.UserID)
+	require.Equal(t, customKey, got.Key)
+	require.Equal(t, "Customer Key", got.Name)
+	require.Equal(t, 100.0, got.Quota)
+	require.Equal(t, 5.0, got.RateLimit5h)
+	require.Equal(t, 50.0, got.RateLimit7d)
+	require.NotNil(t, got.ExpiresAt)
+	require.True(t, got.ExpiresAt.Equal(expiresAt))
+	require.NotNil(t, apiKeyRepo.created)
+	require.Equal(t, []string{customKey}, cache.keys)
+}
+
+func TestAdminService_AdminCreateAPIKey_ExclusiveGroupAddsAllowedGroup(t *testing.T) {
+	groupID := int64(10)
+	userRepo := &userRepoStubForGroupUpdate{user: &User{ID: 42, Email: "user@example.com", Status: StatusActive}}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{}
+	groupRepo := &groupRepoStubForGroupUpdate{group: &Group{ID: groupID, Name: "Exclusive", Status: StatusActive, IsExclusive: true, SubscriptionType: SubscriptionTypeStandard}}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, userRepo: userRepo, groupRepo: groupRepo}
+
+	got, err := svc.AdminCreateAPIKey(context.Background(), 42, &AdminCreateAPIKeyInput{
+		Name:    "Customer Key",
+		GroupID: &groupID,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, got.GroupID)
+	require.Equal(t, groupID, *got.GroupID)
+	require.True(t, userRepo.addGroupCalled)
+	require.Equal(t, int64(42), userRepo.addedUserID)
+	require.Equal(t, groupID, userRepo.addedGroupID)
+	require.NotNil(t, apiKeyRepo.created)
+	require.Equal(t, groupID, *apiKeyRepo.created.GroupID)
+}
+
+func TestAdminService_AdminCreateAPIKey_RejectsPastExpiresAt(t *testing.T) {
+	expiresAt := time.Now().Add(-time.Hour)
+	userRepo := &userRepoStubForGroupUpdate{user: &User{ID: 42, Email: "user@example.com", Status: StatusActive}}
+	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{}
+	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, userRepo: userRepo}
+
+	_, err := svc.AdminCreateAPIKey(context.Background(), 42, &AdminCreateAPIKeyInput{
+		Name:      "Customer Key",
+		ExpiresAt: &expiresAt,
+	})
+
+	require.Error(t, err)
+	require.Equal(t, "API_KEY_EXPIRES_AT_INVALID", infraerrors.Reason(err))
+	require.Nil(t, apiKeyRepo.created)
+}
 
 func TestAdminService_AdminUpdateAPIKeyGroupID_KeyNotFound(t *testing.T) {
 	repo := &apiKeyRepoStubForGroupUpdate{getErr: ErrAPIKeyNotFound}

@@ -151,6 +151,8 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 	if p.shouldUpdateRateLimits() {
 		if err := p.APIKeyService.UpdateRateLimitUsage(billingCtx, p.APIKey.ID, cost.ActualCost); err != nil {
 			slog.Error("update api key rate limit usage failed", "api_key_id", p.APIKey.ID, "error", err)
+		} else if p.APIKey.ExtraQuota > 0 && deps.billingCacheService != nil {
+			_ = deps.billingCacheService.InvalidateAPIKeyRateLimit(billingCtx, p.APIKey.ID)
 		}
 	}
 
@@ -322,7 +324,11 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	}
 
 	if p.Cost.ActualCost > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() {
-		deps.billingCacheService.QueueUpdateAPIKeyRateLimitUsage(p.APIKey.ID, p.Cost.ActualCost)
+		if p.APIKey.ExtraQuota > 0 {
+			_ = deps.billingCacheService.InvalidateAPIKeyRateLimit(ctx, p.APIKey.ID)
+		} else {
+			deps.billingCacheService.QueueUpdateAPIKeyRateLimitUsage(p.APIKey.ID, p.Cost.ActualCost)
+		}
 	}
 
 	deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)

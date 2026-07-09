@@ -53,6 +53,7 @@ export async function getById(id: number): Promise<ApiKey> {
  * @param ipWhitelist - Optional IP whitelist
  * @param ipBlacklist - Optional IP blacklist
  * @param quota - Optional quota limit in USD (0 = unlimited)
+ * @param extraQuota - Optional extra rate-limit overflow quota in USD (0 = disabled)
  * @param expiresInDays - Optional days until expiry (undefined = never expires)
  * @param rateLimitData - Optional rate limit fields
  * @returns Created API key
@@ -64,6 +65,7 @@ export async function create(
   ipWhitelist?: string[],
   ipBlacklist?: string[],
   quota?: number,
+  extraQuota?: number,
   expiresInDays?: number,
   rateLimitData?: { rate_limit_5h?: number; rate_limit_1d?: number; rate_limit_7d?: number }
 ): Promise<ApiKey> {
@@ -82,6 +84,9 @@ export async function create(
   }
   if (quota !== undefined && quota > 0) {
     payload.quota = quota
+  }
+  if (extraQuota !== undefined && extraQuota > 0) {
+    payload.extra_quota = extraQuota
   }
   if (expiresInDays !== undefined && expiresInDays > 0) {
     payload.expires_in_days = expiresInDays
