@@ -1,13 +1,16 @@
-# Local production deployment for the secondary-development build.
+# Local production deployment for the current secondary-development build.
 #
-# This intentionally uses distinct container names from the old deployment so
-# the database can be restored and verified before the old project is stopped.
+# This intentionally uses distinct container names from the staging deployment.
+# The postgres_data and redis_data directories are independent restored copies;
+# never mount deploy/staging data directories while the staging stack is running.
 
 services:
   sub2api:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        COMMIT: ${SUB2API_COMMIT:-local}
     image: sub2api-dev:local
     container_name: sub2api-dev
     restart: unless-stopped
