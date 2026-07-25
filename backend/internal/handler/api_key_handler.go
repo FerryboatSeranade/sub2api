@@ -51,8 +51,8 @@ type UpdateAPIKeyRequest struct {
 	Name                 string    `json:"name"`
 	GroupID              *int64    `json:"group_id"`
 	Status               string    `json:"status" binding:"omitempty,oneof=active inactive"`
-	IPWhitelist          *[]string `json:"ip_whitelist"` // IP 白名单；nil=不修改，空数组=清空
-	IPBlacklist          *[]string `json:"ip_blacklist"` // IP 黑名单；nil=不修改，空数组=清空
+	IPWhitelist          *[]string `json:"ip_whitelist"` // IP 白名单（nil 不修改，空数组清空）
+	IPBlacklist          *[]string `json:"ip_blacklist"` // IP 黑名单（nil 不修改，空数组清空）
 	Quota                *float64  `json:"quota"`        // 配额限制 (USD), 0=无限制
 	ExtraQuota           *float64  `json:"extra_quota"`  // 限速溢出额外额度 (USD), 0=禁用
 	ExtraQuotaCamel      *float64  `json:"extraQuota"`   // camelCase compatibility
