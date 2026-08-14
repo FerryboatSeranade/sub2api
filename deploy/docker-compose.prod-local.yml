@@ -62,6 +62,16 @@ services:
       - SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS=${SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS:-false}
       - SECURITY_URL_ALLOWLIST_UPSTREAM_HOSTS=${SECURITY_URL_ALLOWLIST_UPSTREAM_HOSTS:-}
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+      # This stack is the upgrade candidate while 8081 remains authoritative.
+      # Prevent copied OAuth credentials and production data from background writes.
+      - TOKEN_REFRESH_ENABLED=false
+      - OPS_ENABLED=false
+      - OPS_CLEANUP_ENABLED=false
+      - OPS_AGGREGATION_ENABLED=false
+      - DASHBOARD_AGGREGATION_ENABLED=false
+      - USAGE_CLEANUP_ENABLED=false
+      - DATABASE_USER_PLATFORM_QUOTA_FLUSHER_ENABLED=false
+      - GATEWAY_USAGE_RECORD_AUTO_SCALE_ENABLED=false
     depends_on:
       postgres:
         condition: service_healthy
@@ -112,12 +122,8 @@ services:
     volumes:
       - ./redis_data:/data
     command: >
-      sh -c '
-        redis-server
-        --save 60 1
-        --appendonly yes
-        --appendfsync everysec
-        ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
+      sh -c 'exec redis-server --save 60 1 --appendonly yes --appendfsync everysec
+      ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
     environment:
       - TZ=${TZ:-Asia/Shanghai}
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
