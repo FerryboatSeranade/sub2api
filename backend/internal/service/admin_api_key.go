@@ -229,69 +229,74 @@ func (s *adminServiceImpl) AdminUpdateAPIKey(ctx context.Context, keyID int64, i
 		return nil, ErrAPIKeyNotFound
 	}
 
-	needsUpdate := false
+	var fields APIKeyUpdateFields
 	if input.Name != nil {
 		apiKey.Name = *input.Name
-		needsUpdate = true
+		fields.Name = true
 	}
 	if input.Status != nil {
 		apiKey.Status = *input.Status
-		needsUpdate = true
+		fields.Status = true
 	}
 	if input.IPWhitelist != nil {
 		apiKey.IPWhitelist = *input.IPWhitelist
-		needsUpdate = true
+		fields.IPRules = true
 	}
 	if input.IPBlacklist != nil {
 		apiKey.IPBlacklist = *input.IPBlacklist
-		needsUpdate = true
+		fields.IPRules = true
 	}
 	if input.Quota != nil {
 		apiKey.Quota = *input.Quota
+		fields.Quota = true
 		if apiKey.Status == StatusAPIKeyQuotaExhausted && *input.Quota > apiKey.QuotaUsed {
 			apiKey.Status = StatusAPIKeyActive
+			fields.Status = true
 		}
-		needsUpdate = true
 	}
 	if input.ExtraQuota != nil {
 		apiKey.ExtraQuota = *input.ExtraQuota
-		needsUpdate = true
+		fields.ExtraQuota = true
 	}
 	if input.ResetQuota != nil && *input.ResetQuota {
 		apiKey.QuotaUsed = 0
+		fields.QuotaUsed = true
 		if apiKey.Status == StatusAPIKeyQuotaExhausted {
 			apiKey.Status = StatusAPIKeyActive
+			fields.Status = true
 		}
-		needsUpdate = true
 	}
-	if input.ResetExtraQuota != nil && *input.ResetExtraQuota {
+	resetExtraQuota := input.ResetExtraQuota != nil && *input.ResetExtraQuota
+	if resetExtraQuota {
 		apiKey.ExtraQuotaUsed = 0
-		needsUpdate = true
+		fields.ExtraQuotaUsed = true
 	}
 	if input.ClearExpiration {
 		apiKey.ExpiresAt = nil
+		fields.ExpiresAt = true
 		if apiKey.Status == StatusAPIKeyExpired {
 			apiKey.Status = StatusAPIKeyActive
+			fields.Status = true
 		}
-		needsUpdate = true
 	} else if input.ExpiresAt != nil {
 		apiKey.ExpiresAt = input.ExpiresAt
+		fields.ExpiresAt = true
 		if apiKey.Status == StatusAPIKeyExpired && time.Now().Before(*input.ExpiresAt) {
 			apiKey.Status = StatusAPIKeyActive
+			fields.Status = true
 		}
-		needsUpdate = true
 	}
 	if input.RateLimit5h != nil {
 		apiKey.RateLimit5h = *input.RateLimit5h
-		needsUpdate = true
+		fields.RateLimits = true
 	}
 	if input.RateLimit1d != nil {
 		apiKey.RateLimit1d = *input.RateLimit1d
-		needsUpdate = true
+		fields.RateLimits = true
 	}
 	if input.RateLimit7d != nil {
 		apiKey.RateLimit7d = *input.RateLimit7d
-		needsUpdate = true
+		fields.RateLimits = true
 	}
 
 	resetRateLimit := input.ResetRateLimitUsage != nil && *input.ResetRateLimitUsage
@@ -302,20 +307,20 @@ func (s *adminServiceImpl) AdminUpdateAPIKey(ctx context.Context, keyID int64, i
 		apiKey.Window5hStart = nil
 		apiKey.Window1dStart = nil
 		apiKey.Window7dStart = nil
-		needsUpdate = true
+		fields.RateLimitUsage = true
 	}
 
-	if !needsUpdate {
+	if fields.IsEmpty() {
 		return result, nil
 	}
 
-	if err := s.apiKeyRepo.Update(ctx, apiKey); err != nil {
+	if err := s.apiKeyRepo.Update(ctx, apiKey, fields); err != nil {
 		return nil, fmt.Errorf("update api key: %w", err)
 	}
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
 	}
-	if resetRateLimit && s.billingCacheService != nil {
+	if (resetRateLimit || input.ExtraQuota != nil || resetExtraQuota) && s.billingCacheService != nil {
 		_ = s.billingCacheService.InvalidateAPIKeyRateLimit(ctx, apiKey.ID)
 	}
 
