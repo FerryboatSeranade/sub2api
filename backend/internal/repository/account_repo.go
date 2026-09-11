@@ -641,7 +641,8 @@ func lockAndMergeAccountProbeExtra(
 			extra -> 'upstream_billing_probe',
 			extra -> 'ollama_cloud_usage_session',
 			extra -> 'ollama_cloud_usage_auto_refresh',
-			extra -> 'ollama_cloud_usage_snapshot'
+			extra -> 'ollama_cloud_usage_snapshot',
+			extra -> 'latest_serial_model_test'
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
@@ -667,6 +668,7 @@ func lockAndMergeAccountProbeExtra(
 		currentOllamaSession         []byte
 		currentOllamaAutoRefresh     []byte
 		currentOllamaSnapshot        []byte
+		currentSerialTest            []byte
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
@@ -678,6 +680,7 @@ func lockAndMergeAccountProbeExtra(
 		&currentOllamaSession,
 		&currentOllamaAutoRefresh,
 		&currentOllamaSnapshot,
+		&currentSerialTest,
 	); err != nil {
 		return nil, err
 	}
@@ -686,6 +689,13 @@ func lockAndMergeAccountProbeExtra(
 	}
 
 	extra := copyJSONMap(normalizeJSONMap(account.Extra))
+	// A stale account edit must never replace a newer probe result.
+	delete(extra, service.SerialTestExtraKey)
+	if result, present, err := decodeAccountExtraJSON(currentSerialTest); err != nil {
+		return nil, err
+	} else if present {
+		extra[service.SerialTestExtraKey] = result
+	}
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,

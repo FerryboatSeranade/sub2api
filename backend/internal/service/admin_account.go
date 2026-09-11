@@ -92,6 +92,7 @@ func cloneAccountJSONMap(value map[string]any) (map[string]any, error) {
 }
 
 var duplicateAccountDiscardedExtraKeys = map[string]struct{}{
+	SerialTestExtraKey: {},
 	// A retry identity belongs to the operation that created one copy, not to later copies.
 	duplicateAccountOperationIDExtraKey: {},
 	// External sync identity belongs to one local account only.

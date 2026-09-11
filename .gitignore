@@ -141,6 +141,8 @@ docs/*
 !docs/ASYNC_IMAGE_TASKS.md
 !docs/BATCH_IMAGE_MVP.md
 !docs/COMPOSITE_GROUPS.md
+!docs/SERIAL_MODEL_TESTS.md
+!docs/CODEX_OAUTH_PROTOCOL_REFERENCE.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/legal/

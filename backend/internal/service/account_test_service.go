@@ -70,6 +70,7 @@ type TestEvent struct {
 type AccountTestOptions struct {
 	ImageDataURL string
 	AudioDataURL string
+	DirectModel  bool
 }
 
 func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
@@ -138,6 +139,7 @@ func normalizeGrokAccountTestMode(mode string) string {
 
 // AccountTestService handles account testing operations
 type AccountTestService struct {
+	serialTests               sync.Map
 	accountRepo               AccountRepository
 	geminiTokenProvider       *GeminiTokenProvider
 	claudeTokenProvider       *ClaudeTokenProvider
@@ -279,6 +281,19 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
+	}
+	if testOpts.DirectModel {
+		c.Set("direct_model_probe", true)
+		// Probe an explicit upstream model without mutating cached account credentials.
+		copyAccount := *account
+		copyAccount.Credentials = make(map[string]any, len(account.Credentials)+1)
+		for key, value := range account.Credentials {
+			copyAccount.Credentials[key] = value
+		}
+		copyAccount.Credentials["model_mapping"] = map[string]any{modelID: modelID}
+		copyAccount.Credentials["compact_model_mapping"] = map[string]any{modelID: modelID}
+		copyAccount.modelMappingCacheReady = false
+		account = &copyAccount
 	}
 
 	// Synthetic UI load-test accounts exercise the real SSE parsing and modal
@@ -734,7 +749,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// Create OpenAI Responses API payload. OAuth accounts use ChatGPT Codex
 	// upstream and must apply the same model normalization as real forwarding.
 	upstreamTestModelID := testModelID
-	if isOAuth {
+	if isOAuth && !c.GetBool("direct_model_probe") {
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)

@@ -118,6 +118,21 @@ describe('AccountTestModal', () => {
     localStorage.clear()
   })
 
+  it('keeps the account dialog open while model configuration owns Escape', async () => {
+    const wrapper = mount(AccountTestModal, {
+      props: { show: true, account: buildAccount() },
+      global: { stubs: { BaseDialog: BaseDialogStub, Select: SelectStub, TextArea: TextAreaStub, Icon: true, SerialModelTestPanel: true } }
+    })
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    wrapper.findComponent({ name: 'SerialModelTestPanel' }).vm.$emit('configuring', true)
+    await flushPromises()
+    expect(wrapper.findComponent(BaseDialogStub).attributes('close-on-escape')).toBe('false')
+    wrapper.findComponent({ name: 'SerialModelTestPanel' }).vm.$emit('configuring', false)
+    await flushPromises()
+    expect(wrapper.findComponent(BaseDialogStub).attributes('close-on-escape')).toBe('true')
+    wrapper.unmount()
+  })
+
   it('posts compact mode for OpenAI compact probe', async () => {
     const wrapper = mount(AccountTestModal, {
       props: {

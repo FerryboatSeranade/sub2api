@@ -27,6 +27,7 @@
       </div>
 
       <!-- API Key fields (only for apikey type) -->
+      <TestedModelMapping v-if="show" :account-id="account.id" @apply="applyTestedMapping" />
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
@@ -2907,6 +2908,8 @@
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import TestedModelMapping from './TestedModelMapping.vue'
+import { remapTestedModels } from '@/api/admin/serialModelTests'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
@@ -3256,6 +3259,17 @@ const antigravityProjectId = ref('')
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
 const antigravityModelMappings = ref<ModelMapping[]>([])
+const applyTestedMapping = (sources: string[], target: string) => {
+  if (props.account?.platform === 'antigravity') {
+    antigravityModelMappings.value = remapTestedModels(antigravityModelMappings.value, sources, target)
+    antigravityModelRestrictionMode.value = 'mapping'
+  } else {
+    modelMappings.value = remapTestedModels(modelMappings.value, sources, target)
+    allowedModels.value = allowedModels.value.filter(model => !sources.includes(model) && model !== target)
+    modelRestrictionMode.value = 'mapping'
+    if (props.account?.platform === 'openai') openaiPassthroughEnabled.value = false
+  }
+}
 const isSyncingAntigravityUpstream = ref(false)
 const tempUnschedEnabled = ref(false)
 const accountSchedulingThresholdOverrideEnabled = ref(false)

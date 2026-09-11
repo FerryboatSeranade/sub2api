@@ -3,9 +3,15 @@
     :show="show"
     :title="t('admin.accounts.testAccountConnection')"
     width="normal"
+    :close-on-escape="!serialConfigOpen"
     @close="handleClose"
   >
-    <div class="space-y-4">
+    <div class="mb-4 flex gap-4 border-b dark:border-dark-500" role="tablist">
+      <button type="button" role="tab" :aria-selected="testView === 'single'" :disabled="serialBusy" class="pb-2 text-sm" :class="testView === 'single' ? 'border-b-2 border-primary-500 text-primary-600' : 'text-gray-500'" @click="testView = 'single'">{{ serialT('single') }}</button>
+      <button type="button" role="tab" :aria-selected="testView === 'serial'" :disabled="status === 'connecting'" class="pb-2 text-sm" :class="testView === 'serial' ? 'border-b-2 border-primary-500 text-primary-600' : 'text-gray-500'" @click="testView = 'serial'">{{ serialT('serial') }}</button>
+    </div>
+    <SerialModelTestPanel v-if="show && account && testView === 'serial'" :account-id="account.id" :account-name="account.name" :platform="account.platform" @busy="serialBusy = $event" @configuring="serialConfigOpen = $event" />
+    <div v-show="testView === 'single'" class="space-y-4">
       <!-- Account Info Card -->
       <div
         v-if="account"
@@ -205,6 +211,7 @@
         </button>
         <button
           @click="startTest"
+          v-if="testView === 'single'"
           :disabled="status === 'connecting' || !selectedModelId"
           :class="[
             'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
@@ -251,9 +258,15 @@ import { Icon } from '@/components/icons'
 import { useClipboard } from '@/composables/useClipboard'
 import { buildApiUrl } from '@/api/client'
 import { adminAPI } from '@/api/admin'
+import SerialModelTestPanel from './SerialModelTestPanel.vue'
+import { serialTestMessages } from './serialTestMessages'
 import type { Account, ClaudeModel } from '@/types'
 
 const { t } = useI18n()
+const { t: serialT } = useI18n({ useScope: 'local', messages: serialTestMessages })
+const testView = ref<'single' | 'serial'>('single')
+const serialBusy = ref(false)
+const serialConfigOpen = ref(false)
 const { copyToClipboard } = useClipboard()
 
 interface OutputLine {
