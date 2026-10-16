@@ -134,6 +134,8 @@ type apiKeyAllByUserIDLister interface {
 
 // APIKeyRateLimitData holds rate limit usage and window state for an API key.
 type APIKeyRateLimitData struct {
+	// QuotaUsed tracks total consumed quota.
+	QuotaUsed      float64
 	Usage5h        float64
 	Usage1d        float64
 	Usage7d        float64
