@@ -2,7 +2,7 @@
   "name": "sub2api-staging",
   "services": {
     "sub2api": {
-      "image": "sub2api-staging:hz-20261017",
+      "image": "sub2api-staging:hz-quality-20261017",
       "container_name": "sub2api-staging",
       "restart": "unless-stopped",
       "env_file": [

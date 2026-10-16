@@ -12,28 +12,31 @@ import (
 // ScheduledTestHandler handles admin scheduled-test-plan management.
 type ScheduledTestHandler struct {
 	scheduledTestSvc *service.ScheduledTestService
+	runner           *service.ScheduledTestRunnerService
 }
 
 // NewScheduledTestHandler creates a new ScheduledTestHandler.
-func NewScheduledTestHandler(scheduledTestSvc *service.ScheduledTestService) *ScheduledTestHandler {
-	return &ScheduledTestHandler{scheduledTestSvc: scheduledTestSvc}
+func NewScheduledTestHandler(scheduledTestSvc *service.ScheduledTestService, runner *service.ScheduledTestRunnerService) *ScheduledTestHandler {
+	return &ScheduledTestHandler{scheduledTestSvc: scheduledTestSvc, runner: runner}
 }
 
 type createScheduledTestPlanRequest struct {
-	AccountID      int64  `json:"account_id" binding:"required"`
-	ModelID        string `json:"model_id"`
-	CronExpression string `json:"cron_expression" binding:"required"`
-	Enabled        *bool  `json:"enabled"`
-	MaxResults     int    `json:"max_results"`
-	AutoRecover    *bool  `json:"auto_recover"`
+	AccountID      int64   `json:"account_id" binding:"required"`
+	ModelID        string  `json:"model_id"`
+	TestKind       *string `json:"test_kind"`
+	CronExpression string  `json:"cron_expression" binding:"required"`
+	Enabled        *bool   `json:"enabled"`
+	MaxResults     int     `json:"max_results"`
+	AutoRecover    *bool   `json:"auto_recover"`
 }
 
 type updateScheduledTestPlanRequest struct {
-	ModelID        string `json:"model_id"`
-	CronExpression string `json:"cron_expression"`
-	Enabled        *bool  `json:"enabled"`
-	MaxResults     int    `json:"max_results"`
-	AutoRecover    *bool  `json:"auto_recover"`
+	ModelID        string  `json:"model_id"`
+	TestKind       *string `json:"test_kind"`
+	CronExpression string  `json:"cron_expression"`
+	Enabled        *bool   `json:"enabled"`
+	MaxResults     int     `json:"max_results"`
+	AutoRecover    *bool   `json:"auto_recover"`
 }
 
 // ListByAccount GET /admin/accounts/:id/scheduled-test-plans
@@ -66,6 +69,9 @@ func (h *ScheduledTestHandler) Create(c *gin.Context) {
 		CronExpression: req.CronExpression,
 		Enabled:        true,
 		MaxResults:     req.MaxResults,
+	}
+	if req.TestKind != nil {
+		plan.TestKind = *req.TestKind
 	}
 	if req.Enabled != nil {
 		plan.Enabled = *req.Enabled
@@ -102,6 +108,9 @@ func (h *ScheduledTestHandler) Update(c *gin.Context) {
 		return
 	}
 
+	if req.TestKind != nil {
+		existing.TestKind = *req.TestKind
+	}
 	if req.ModelID != "" {
 		existing.ModelID = req.ModelID
 	}
@@ -160,4 +169,33 @@ func (h *ScheduledTestHandler) ListResults(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, results)
+}
+
+// RunNow executes a saved plan once, including disabled plans, without enabling it.
+func (h *ScheduledTestHandler) RunNow(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "invalid plan id")
+		return
+	}
+	plan, err := h.scheduledTestSvc.GetPlan(c.Request.Context(), id)
+	if err != nil {
+		response.NotFound(c, "plan not found")
+		return
+	}
+	result, err := h.runner.ExecutePlan(c.Request.Context(), plan)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *ScheduledTestHandler) ReasoningOverview(c *gin.Context) {
+	items, err := h.scheduledTestSvc.ReasoningOverview(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, items)
 }

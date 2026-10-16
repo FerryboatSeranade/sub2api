@@ -74,7 +74,29 @@ export async function listResults(planId: number, limit?: number): Promise<Sched
   return data ?? []
 }
 
+export async function runNow(id: number): Promise<ScheduledTestResult> {
+  const { data } = await apiClient.post<ScheduledTestResult>(`/admin/scheduled-test-plans/${id}/run`, {}, { timeout: 210000 })
+  return data
+}
+
+export interface ReasoningOverviewItem {
+  account_id: number
+  account_name: string
+  plan_id: number
+  enabled: boolean
+  cron_expression: string
+  next_run_at: string | null
+  result: ScheduledTestResult | null
+}
+
+export async function reasoningOverview(): Promise<ReasoningOverviewItem[]> {
+  const { data } = await apiClient.get<ReasoningOverviewItem[]>('/admin/scheduled-test-plans/reasoning-overview')
+  return data ?? []
+}
+
 export const scheduledTestsAPI = {
+  reasoningOverview,
+  runNow,
   listByAccount,
   create,
   update,

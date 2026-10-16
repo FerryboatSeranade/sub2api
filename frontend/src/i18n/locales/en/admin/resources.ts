@@ -1,5 +1,24 @@
 export default {
     scheduledTests: {
+      overview: "Reasoning probe overview",
+      runAll: "Run all (2 concurrent)",
+      exportResults: "Export results",
+      not_tested: "Not tested",
+      searchProbe: "Search account or verdict",
+      answer: "Answer / error",
+      stopQueue: "Stop queued tests",
+
+      kind: "Test type",
+      connectivity: "Connectivity",
+      candyProbe: "Candy reasoning probe",
+      qualityHelp: "Fixed gpt-6.1-sol / high; no tools. A standalone 21 anywhere in the answer passes; otherwise it fails. Failed calls or empty answers are inconclusive. This single-question heuristic is not a general intelligence assessment and does not disable or recover accounts.",
+      runNow: "Run now",
+      not_degraded: "Not degraded (contains 21)",
+      degraded: "Degraded (no 21)",
+      inconclusive: "Inconclusive (call failed)",
+      numbers: "Extracted numbers",
+      contains21: "Contains 21",
+
       title: 'Scheduled Tests',
       addPlan: 'Add Plan',
       editPlan: 'Edit Plan',

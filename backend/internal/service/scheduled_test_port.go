@@ -10,6 +10,7 @@ type ScheduledTestPlan struct {
 	ID             int64      `json:"id"`
 	AccountID      int64      `json:"account_id"`
 	ModelID        string     `json:"model_id"`
+	TestKind       string     `json:"test_kind"`
 	CronExpression string     `json:"cron_expression"`
 	Enabled        bool       `json:"enabled"`
 	MaxResults     int        `json:"max_results"`
@@ -22,15 +23,18 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
-	ID           int64     `json:"id"`
-	PlanID       int64     `json:"plan_id"`
-	Status       string    `json:"status"`
-	ResponseText string    `json:"response_text"`
-	ErrorMessage string    `json:"error_message"`
-	LatencyMs    int64     `json:"latency_ms"`
-	StartedAt    time.Time `json:"started_at"`
-	FinishedAt   time.Time `json:"finished_at"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           int64                     `json:"id"`
+	PlanID       int64                     `json:"plan_id"`
+	TestKind     string                    `json:"test_kind"`
+	ModelID      string                    `json:"model_id"`
+	Quality      *ReasoningProbeEvaluation `json:"quality,omitempty"`
+	Status       string                    `json:"status"`
+	ResponseText string                    `json:"response_text"`
+	ErrorMessage string                    `json:"error_message"`
+	LatencyMs    int64                     `json:"latency_ms"`
+	StartedAt    time.Time                 `json:"started_at"`
+	FinishedAt   time.Time                 `json:"finished_at"`
+	CreatedAt    time.Time                 `json:"created_at"`
 }
 
 // ScheduledTestPlanRepository defines the data access interface for test plans.
@@ -46,7 +50,19 @@ type ScheduledTestPlanRepository interface {
 
 // ScheduledTestResultRepository defines the data access interface for test results.
 type ScheduledTestResultRepository interface {
+	ListReasoningOverview(ctx context.Context) ([]*ReasoningProbeOverview, error)
 	Create(ctx context.Context, result *ScheduledTestResult) (*ScheduledTestResult, error)
 	ListByPlanID(ctx context.Context, planID int64, limit int) ([]*ScheduledTestResult, error)
 	PruneOldResults(ctx context.Context, planID int64, keepCount int) error
+}
+
+// ReasoningProbeOverview contains only account display metadata and test results.
+type ReasoningProbeOverview struct {
+	AccountID      int64                `json:"account_id"`
+	AccountName    string               `json:"account_name"`
+	PlanID         int64                `json:"plan_id"`
+	Enabled        bool                 `json:"enabled"`
+	CronExpression string               `json:"cron_expression"`
+	NextRunAt      *time.Time           `json:"next_run_at"`
+	Result         *ScheduledTestResult `json:"result"`
 }

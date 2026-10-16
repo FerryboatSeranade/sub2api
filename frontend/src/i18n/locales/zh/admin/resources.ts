@@ -1,5 +1,24 @@
 export default {
     scheduledTests: {
+      overview: "降智检测总览",
+      runAll: "检测全部（并发 2）",
+      exportResults: "导出结果",
+      not_tested: "尚未检测",
+      searchProbe: "搜索账号或筛选判定",
+      answer: "回答 / 异常",
+      stopQueue: "停止排队",
+
+      kind: "测试类型",
+      connectivity: "连接测试",
+      candyProbe: "糖果题 · 降智检测",
+      qualityHelp: "固定 gpt-6.1-sol / high，禁用工具。回答中的独立数字包含 21 判为“不降智”，否则判为“降智”；调用失败或空回答为“无法判定”。这是单题启发式，包含推导中的 21 也算通过，不代表整体能力。不会自动停用或恢复账号。",
+      runNow: "立即检测",
+      not_degraded: "不降智（包含 21）",
+      degraded: "降智（未包含 21）",
+      inconclusive: "无法判定（调用异常）",
+      numbers: "提取数字",
+      contains21: "是否包含 21",
+
       title: '定时测试',
       addPlan: '添加计划',
       editPlan: '编辑计划',

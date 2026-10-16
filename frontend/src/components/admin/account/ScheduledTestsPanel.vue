@@ -29,11 +29,17 @@
           {{ t('admin.scheduledTests.addPlan') }}
         </div>
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="mb-1 block text-xs font-medium">{{ t('admin.scheduledTests.kind') }}</label>
+            <Select v-model="newPlan.test_kind" :options="testKindOptions" />
+            <p v-if="newPlan.test_kind === 'candy_v1'" class="mt-2 text-xs text-gray-500">{{ t('admin.scheduledTests.qualityHelp') }}</p>
+          </div>
           <div>
             <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
               {{ t('admin.scheduledTests.model') }}
             </label>
-            <Select
+            <Input v-if="newPlan.test_kind === 'candy_v1'" model-value="gpt-6.1-sol" disabled />
+            <Select v-else
               v-model="newPlan.model_id"
               :options="modelOptions"
               :placeholder="t('admin.scheduledTests.model')"
@@ -99,7 +105,7 @@
           <div class="flex items-end">
             <div>
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <Toggle v-model="newPlan.auto_recover" />
+                <Toggle v-model="newPlan.auto_recover" :disabled="newPlan.test_kind === 'candy_v1'" />
                 {{ t('admin.scheduledTests.autoRecover') }}
               </label>
               <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
@@ -199,8 +205,12 @@
                 <div>{{ formatDateTime(plan.next_run_at) }}</div>
               </div>
 
+              <span v-if="plan.test_kind === 'candy_v1'" class="text-xs text-primary-600">{{ t('admin.scheduledTests.candyProbe') }}</span>
               <!-- Actions -->
               <div class="flex items-center gap-1" @click.stop>
+                <button @click="handleRun(plan)" :disabled="runningPlanIds.has(plan.id)" :title="t('admin.scheduledTests.runNow')" class="rounded-lg px-2 py-1 text-xs text-primary-600 hover:bg-primary-50 disabled:opacity-50">
+                  {{ runningPlanIds.has(plan.id) ? t('admin.scheduledTests.running') : t('admin.scheduledTests.runNow') }}
+                </button>
                 <button
                   @click="startEdit(plan)"
                   class="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-900/20"
@@ -239,12 +249,18 @@
               {{ t('admin.scheduledTests.editPlan') }}
             </div>
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="mb-1 block text-xs font-medium">{{ t('admin.scheduledTests.kind') }}</label>
+            <Select v-model="editForm.test_kind" :options="testKindOptions" />
+            <p v-if="editForm.test_kind === 'candy_v1'" class="mt-2 text-xs text-gray-500">{{ t('admin.scheduledTests.qualityHelp') }}</p>
+          </div>
               <div>
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                   {{ t('admin.scheduledTests.model') }}
                 </label>
-                <Select
-                  v-model="editForm.model_id"
+                <Input v-if="editForm.test_kind === 'candy_v1'" model-value="gpt-6.1-sol" disabled />
+            <Select v-else
+              v-model="editForm.model_id"
                   :options="modelOptions"
                   :placeholder="t('admin.scheduledTests.model')"
                   :searchable="modelOptions.length > 5"
@@ -309,7 +325,7 @@
               <div class="flex items-end">
                 <div>
                   <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <Toggle v-model="editForm.auto_recover" />
+                    <Toggle v-model="editForm.auto_recover" :disabled="editForm.test_kind === 'candy_v1'" />
                     {{ t('admin.scheduledTests.autoRecover') }}
                   </label>
                   <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
@@ -400,6 +416,12 @@
                   </span>
                 </div>
 
+                <div v-if="result.quality" class="mt-2 text-xs" :class="result.quality.verdict === 'not_degraded' ? 'text-green-600' : result.quality.verdict === 'degraded' ? 'text-red-600' : 'text-gray-500'">
+                  <strong>{{ t('admin.scheduledTests.' + result.quality.verdict) }}</strong>
+                  <span class="ml-2">{{ result.model_id }}</span>
+                  <p class="mt-1 break-words">{{ t('admin.scheduledTests.numbers') }}: {{ result.quality.numbers.join(', ') || '—' }}</p>
+                  <p>{{ t('admin.scheduledTests.contains21') }}: {{ result.quality.contains_21 === null ? '—' : result.quality.contains_21 ? t('common.yes') : t('common.no') }}</p>
+                </div>
                 <!-- Response / Error (collapsible) -->
                 <div v-if="result.error_message" class="mt-2">
                   <div
@@ -463,7 +485,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onBeforeUnmount } from 'vue'
+import { ref, reactive, watch, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -490,6 +512,25 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
+const testKindOptions = computed(() => [
+  { value: 'connectivity', label: t('admin.scheduledTests.connectivity') },
+  { value: 'candy_v1', label: t('admin.scheduledTests.candyProbe') }
+])
+const runningPlanIds = reactive(new Set<number>())
+const handleRun = async (plan: ScheduledTestPlan) => {
+  const accountId = props.accountId
+  runningPlanIds.add(plan.id)
+  try {
+    await adminAPI.scheduledTests.runNow(plan.id)
+    if (!props.show || props.accountId !== accountId) return
+    await loadPlans()
+    expandedPlanId.value = null
+    await toggleExpand(plan.id)
+  } catch (error: any) {
+    appStore.showError(error?.message || 'Test failed')
+  } finally { runningPlanIds.delete(plan.id) }
+}
+
 // State
 const loading = ref(false)
 const creating = ref(false)
@@ -511,6 +552,7 @@ const deletingPlan = ref<ScheduledTestPlan | null>(null)
 const editingPlanId = ref<number | null>(null)
 const updating = ref(false)
 const editForm = reactive({
+  test_kind: 'connectivity' as 'connectivity' | 'candy_v1',
   model_id: '' as string,
   cron_expression: '' as string,
   max_results: '100' as string,
@@ -519,6 +561,7 @@ const editForm = reactive({
 })
 
 const newPlan = reactive({
+  test_kind: 'connectivity' as 'connectivity' | 'candy_v1',
   model_id: '' as string,
   cron_expression: '' as string,
   max_results: '100' as string,
@@ -527,11 +570,22 @@ const newPlan = reactive({
 })
 
 const resetNewPlan = () => {
+  newPlan.test_kind = 'connectivity'
   newPlan.model_id = ''
   newPlan.cron_expression = ''
   newPlan.max_results = '100'
   newPlan.enabled = true
   newPlan.auto_recover = false
+}
+
+for (const form of [newPlan, editForm]) {
+  watch(() => form.test_kind, (kind) => {
+    if (kind === 'candy_v1') {
+      form.model_id = 'gpt-6.1-sol'
+      form.auto_recover = false
+      if (!form.cron_expression) form.cron_expression = '0 3 * * *'
+    }
+  })
 }
 
 // Load plans when dialog opens
@@ -571,6 +625,7 @@ const handleCreate = async () => {
     await adminAPI.scheduledTests.create({
       account_id: props.accountId,
       model_id: newPlan.model_id,
+      test_kind: newPlan.test_kind,
       cron_expression: newPlan.cron_expression,
       enabled: newPlan.enabled,
       max_results: maxResults,
@@ -602,6 +657,7 @@ const handleToggleEnabled = async (plan: ScheduledTestPlan, enabled: boolean) =>
 
 const startEdit = (plan: ScheduledTestPlan) => {
   editingPlanId.value = plan.id
+  editForm.test_kind = plan.test_kind || 'connectivity'
   editForm.model_id = plan.model_id
   editForm.cron_expression = plan.cron_expression
   editForm.max_results = String(plan.max_results)
@@ -619,6 +675,7 @@ const handleEdit = async () => {
   try {
     const updated = await adminAPI.scheduledTests.update(editingPlanId.value, {
       model_id: editForm.model_id,
+      test_kind: editForm.test_kind,
       cron_expression: editForm.cron_expression,
       max_results: Number(editForm.max_results) || 100,
       enabled: editForm.enabled,

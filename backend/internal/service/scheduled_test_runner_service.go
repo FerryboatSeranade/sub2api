@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -20,9 +21,11 @@ type ScheduledTestRunnerService struct {
 	rateLimitSvc   *RateLimitService
 	cfg            *config.Config
 
-	cron      *cron.Cron
-	startOnce sync.Once
-	stopOnce  sync.Once
+	cron           *cron.Cron
+	startOnce      sync.Once
+	stopOnce       sync.Once
+	running        sync.Map
+	reasoningSlots chan struct{}
 }
 
 // NewScheduledTestRunnerService creates a new runner.
@@ -39,6 +42,7 @@ func NewScheduledTestRunnerService(
 		accountTestSvc: accountTestSvc,
 		rateLimitSvc:   rateLimitSvc,
 		cfg:            cfg,
+		reasoningSlots: make(chan struct{}, 2),
 	}
 }
 
@@ -55,7 +59,7 @@ func (s *ScheduledTestRunnerService) Start() {
 			}
 		}
 
-		c := cron.New(cron.WithParser(scheduledTestCronParser), cron.WithLocation(loc))
+		c := cron.New(cron.WithParser(scheduledTestCronParser), cron.WithLocation(loc), cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger)))
 		_, err := c.AddFunc("* * * * *", func() { s.runScheduled() })
 		if err != nil {
 			logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] not started (invalid schedule): %v", err)
@@ -120,30 +124,59 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 }
 
 func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) {
-	result, err := s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
+	if _, err := s.ExecutePlan(ctx, plan); err != nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d execution error: %v", plan.ID, err)
+	}
+}
+
+// ExecutePlan is shared by scheduled and manual runs. The account lock prevents
+// overlapping probes on one account; the cron guard prevents overlapping scans.
+func (s *ScheduledTestRunnerService) ExecutePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestResult, error) {
+	if _, loaded := s.running.LoadOrStore(plan.AccountID, true); loaded {
+		return nil, fmt.Errorf("account test already running")
+	}
+	defer s.running.Delete(plan.AccountID)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	defer cancel()
+	var result *ScheduledTestResult
+	var err error
+	if plan.TestKind == ScheduledTestCandyV1 {
+		select {
+		case s.reasoningSlots <- struct{}{}:
+			defer func() { <-s.reasoningSlots }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		result, err = s.accountTestSvc.RunReasoningProbe(ctx, plan.AccountID)
+	} else {
+		result, err = s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
+	}
 	if err != nil {
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d RunTestBackground error: %v", plan.ID, err)
-		return
+		return nil, err
 	}
 
+	// Persist timeout/failure results even if the probe exhausted its context.
+	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer persistCancel()
+	ctx = persistCtx
 	if err := s.scheduledSvc.SaveResult(ctx, plan.ID, plan.MaxResults, result); err != nil {
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d SaveResult error: %v", plan.ID, err)
+		return nil, err
 	}
 
 	// Auto-recover account if test succeeded and auto_recover is enabled.
-	if result.Status == "success" && plan.AutoRecover {
+	if result.Status == "success" && plan.AutoRecover && plan.TestKind != ScheduledTestCandyV1 {
 		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID)
 	}
 
 	nextRun, err := computeNextRun(plan.CronExpression, time.Now())
 	if err != nil {
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d computeNextRun error: %v", plan.ID, err)
-		return
+		return nil, err
 	}
 
 	if err := s.planRepo.UpdateAfterRun(ctx, plan.ID, time.Now(), nextRun); err != nil {
-		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d UpdateAfterRun error: %v", plan.ID, err)
+		return nil, err
 	}
+	return result, nil
 }
 
 // tryRecoverAccount attempts to recover an account from recoverable runtime state.
