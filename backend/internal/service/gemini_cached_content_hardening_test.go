@@ -366,6 +366,8 @@ type fixedChargeAPIKeyRepoStub struct {
 	data *APIKeyRateLimitData
 }
 
+func (r *fixedChargeAPIKeyRepoStub) ResetRateLimitWindows(context.Context, int64) error { return nil }
+
 func (r *fixedChargeAPIKeyRepoStub) GetRateLimitData(context.Context, int64) (*APIKeyRateLimitData, error) {
 	return r.data, nil
 }
