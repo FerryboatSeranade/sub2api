@@ -712,10 +712,10 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 	regularRemaining := pending
 	for _, window := range [][2]float64{{usage5h, apiKey.RateLimit5h}, {usage1d, apiKey.RateLimit1d}, {usage7d, apiKey.RateLimit7d}} {
 		if window[1] > 0 {
-			regularRemaining = min(regularRemaining, max(0, window[1]-window[0]))
+			regularRemaining = math.Min(regularRemaining, math.Max(0, window[1]-window[0]))
 		}
 	}
-	extraNeeded := max(0, pending-regularRemaining)
+	extraNeeded := math.Max(0, pending-regularRemaining)
 	if apiKey.ExtraQuota > 0 && extraQuotaUsed < apiKey.ExtraQuota && extraQuotaUsed+extraNeeded <= apiKey.ExtraQuota {
 		return nil
 	}
