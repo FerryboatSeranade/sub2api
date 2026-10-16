@@ -1,0 +1,114 @@
+{
+  "name": "sub2api-staging",
+  "services": {
+    "sub2api": {
+      "image": "sub2api-staging:hz-20261017",
+      "container_name": "sub2api-staging",
+      "restart": "unless-stopped",
+      "env_file": [
+        {
+          "path": "./.hz-private/sub2api.env",
+          "format": "raw"
+        }
+      ],
+      "networks": [
+        "sub2api-staging-network"
+      ],
+      "ports": [
+        "${HZ_BIND_HOST:-0.0.0.0}:8081:8080"
+      ],
+      "volumes": [
+        "./staging/data:/app/data"
+      ],
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "redis": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "5",
+          "-O",
+          "/dev/null",
+          "http://localhost:8080/health"
+        ],
+        "interval": "30000000000ns",
+        "timeout": "10000000000ns",
+        "retries": 3,
+        "start_period": "30000000000ns"
+      }
+    },
+    "postgres": {
+      "image": "postgres:18-alpine",
+      "container_name": "sub2api-staging-postgres",
+      "restart": "unless-stopped",
+      "env_file": [
+        {
+          "path": "./.hz-private/postgres.env",
+          "format": "raw"
+        }
+      ],
+      "networks": [
+        "sub2api-staging-network"
+      ],
+      "volumes": [
+        "./staging/postgres_data:/var/lib/postgresql/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U sub2api -d sub2api"
+        ],
+        "interval": "10000000000ns",
+        "timeout": "5000000000ns",
+        "retries": 5,
+        "start_period": "10000000000ns"
+      }
+    },
+    "redis": {
+      "image": "redis:8-alpine",
+      "container_name": "sub2api-staging-redis",
+      "restart": "unless-stopped",
+      "env_file": [
+        {
+          "path": "./.hz-private/redis.env",
+          "format": "raw"
+        }
+      ],
+      "networks": [
+        "sub2api-staging-network"
+      ],
+      "volumes": [
+        "./staging/redis_data:/data"
+      ],
+      "command": [
+        "sh",
+        "-c",
+        "exec redis-server --save 60 1 --appendonly yes --appendfsync everysec $${REDISCLI_AUTH:+--requirepass \"$${REDISCLI_AUTH}\"}"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ],
+        "interval": "10000000000ns",
+        "timeout": "5000000000ns",
+        "retries": 5,
+        "start_period": "5000000000ns"
+      }
+    }
+  },
+  "networks": {
+    "sub2api-staging-network": {
+      "driver": "bridge"
+    }
+  }
+}

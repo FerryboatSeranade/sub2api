@@ -140,7 +140,7 @@ func TestBillingCacheServiceEvaluateRateLimits_UsesExtraQuotaAfterRegularWindowL
 		ExtraQuotaUsed: 3,
 	}
 
-	err := svc.evaluateRateLimits(context.Background(), apiKey, 5, 0, 0, billingCacheTimePtr(time.Now()), nil, nil, apiKey.ExtraQuotaUsed)
+	err := svc.evaluateRateLimits(context.Background(), apiKey, 5, 0, 0, billingCacheTimePtr(time.Now()), nil, nil, apiKey.ExtraQuotaUsed, 0)
 	require.NoError(t, err)
 }
 
@@ -153,7 +153,7 @@ func TestBillingCacheServiceEvaluateRateLimits_RejectsWhenExtraQuotaExhausted(t 
 		ExtraQuotaUsed: 10,
 	}
 
-	err := svc.evaluateRateLimits(context.Background(), apiKey, 5, 0, 0, billingCacheTimePtr(time.Now()), nil, nil, apiKey.ExtraQuotaUsed)
+	err := svc.evaluateRateLimits(context.Background(), apiKey, 5, 0, 0, billingCacheTimePtr(time.Now()), nil, nil, apiKey.ExtraQuotaUsed, 0)
 	require.ErrorIs(t, err, ErrAPIKeyRateLimit5hExceeded)
 }
 

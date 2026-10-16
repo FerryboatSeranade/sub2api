@@ -649,11 +649,7 @@ func (s *BillingCacheService) checkAPIKeyRateLimitsWithPending(ctx context.Conte
 }
 
 // evaluateRateLimits checks usage against limits, triggering async resets for expired windows.
-func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *APIKey, usage5h, usage1d, usage7d float64, w5h, w1d, w7d *time.Time, extraQuotaUsed float64, pendingAmounts ...float64) error {
-	pending := 0.0
-	if len(pendingAmounts) > 0 {
-		pending = pendingAmounts[0]
-	}
+func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *APIKey, usage5h, usage1d, usage7d float64, w5h, w1d, w7d *time.Time, extraQuotaUsed, pending float64) error {
 	needsReset := false
 
 	// Reset expired windows in-memory for check purposes
@@ -711,7 +707,16 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 	if limitErr == nil {
 		return nil
 	}
-	if apiKey.ExtraQuota > 0 && extraQuotaUsed < apiKey.ExtraQuota && extraQuotaUsed+pending <= apiKey.ExtraQuota {
+	// Only the part exceeding the tightest regular window consumes extra quota,
+	// matching the billing repository's extra_quota_delta calculation.
+	regularRemaining := pending
+	for _, window := range [][2]float64{{usage5h, apiKey.RateLimit5h}, {usage1d, apiKey.RateLimit1d}, {usage7d, apiKey.RateLimit7d}} {
+		if window[1] > 0 {
+			regularRemaining = min(regularRemaining, max(0, window[1]-window[0]))
+		}
+	}
+	extraNeeded := max(0, pending-regularRemaining)
+	if apiKey.ExtraQuota > 0 && extraQuotaUsed < apiKey.ExtraQuota && extraQuotaUsed+extraNeeded <= apiKey.ExtraQuota {
 		return nil
 	}
 	return limitErr
@@ -899,20 +904,11 @@ func (s *BillingCacheService) checkFixedChargeAPIKey(ctx context.Context, apiKey
 	if err != nil {
 		return ErrBillingServiceUnavailable.WithCause(err)
 	}
-	exceeds := func(usage, limit float64) bool {
-		return limit > 0 && usage+pending > limit
-	}
-	switch {
-	case exceeds(data.QuotaUsed, apiKey.Quota):
+	if apiKey.Quota > 0 && data.QuotaUsed+pending > apiKey.Quota {
 		return ErrAPIKeyQuotaExhausted
-	case exceeds(data.EffectiveUsage5h(), apiKey.RateLimit5h):
-		return ErrAPIKeyRateLimit5hExceeded
-	case exceeds(data.EffectiveUsage1d(), apiKey.RateLimit1d):
-		return ErrAPIKeyRateLimit1dExceeded
-	case exceeds(data.EffectiveUsage7d(), apiKey.RateLimit7d):
-		return ErrAPIKeyRateLimit7dExceeded
 	}
-	return nil
+	return s.evaluateRateLimits(ctx, apiKey, data.Usage5h, data.Usage1d, data.Usage7d,
+		data.Window5hStart, data.Window1dStart, data.Window7dStart, data.ExtraQuotaUsed, pending)
 }
 
 // checkSimpleModeAPIKeyRateLimits is deliberately DB-authoritative. Redis
