@@ -22,3 +22,18 @@ Migration snapshots and logs are outside this checkout at
 The original OVH checkout, database and application container are retained.
 Do not start both applications against divergent databases after cutover.
 Rollback after new writes requires transferring those writes back first.
+
+## vm2api upstream
+
+The `vm2api-hz` OpenAI group uses the account with the same name (concurrency
+2), advertising `gpt-6-sol` and `gpt-6-luna`. Select this group when creating a
+Sub2API client API key. The normal client base URL remains
+`https://code.gogoais.com/v1`.
+
+`vm2api-relay` exposes only `/v1/` on the private Docker bridge gateway
+`172.20.0.1:8788`, forwarding to the host-local vm2api listener
+`127.0.0.1:8787`. It does not publish the vm2api management panel. Both services
+restart automatically. If the Docker network is deliberately deleted and
+recreated with a different subnet, update the relay listener and the account's
+base URL together. The vm2api client key remains in private runtime storage
+and Sub2API credentials, never in Git.
