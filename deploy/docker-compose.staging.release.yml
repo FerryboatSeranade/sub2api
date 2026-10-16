@@ -1,0 +1,13 @@
+# Local staging release, layered on docker-compose.staging.yml.
+services:
+  sub2api:
+    image: sub2api-staging:20260919-0.2.5
+    build:
+      context: /root/data/docker_data/sub2api-upgrade-20260919/build
+      dockerfile: Dockerfile
+  redis:
+    # Keep the arguments in one shell command; the base file splits them.
+    command:
+      - sh
+      - -c
+      - 'exec redis-server --save 60 1 --appendonly yes --appendfsync everysec $${REDISCLI_AUTH:+--requirepass "$${REDISCLI_AUTH}"}'

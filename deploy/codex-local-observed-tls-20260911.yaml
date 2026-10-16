@@ -1,0 +1,17 @@
+# Observed local ClientHello; attribution based on request/time correlation.
+# JA3: 6a5d235ee78c6aede6a61448b4e9ff1e
+# No ALPN, supported_versions, key_share or PSK modes extensions observed.
+# Empty fields may use implementation defaults; explicit extension order is essential.
+# Actual sub2api forwarding and emitted ClientHello have not been verified.
+codex_local_observed:
+  name: "Codex Local Observed 2026-09-11"
+  enable_grease: false
+  cipher_suites: [49196, 49195, 49200, 49199, 49188, 49187, 49192, 49191, 49162, 49161, 49172, 49171, 157, 156, 61, 60, 53, 47]
+  curves: [29, 23, 24]
+  point_formats: [0]
+  signature_algorithms: [2052, 2053, 2054, 1025, 1281, 513, 1027, 1283, 515, 514, 1537, 1539]
+  alpn_protocols: []
+  supported_versions: []
+  key_share_groups: []
+  psk_modes: []
+  extensions: [0, 10, 11, 13, 35, 23, 65281]
