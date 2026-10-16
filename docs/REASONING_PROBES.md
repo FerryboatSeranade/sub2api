@@ -32,3 +32,15 @@
 ## 部署与回滚
 
 迁移 `246_scheduled_reasoning_probe.sql` 仅新增带默认值的列，兼容旧应用。发布前保留原镜像和 Compose 配置，备份定时测试表。回滚应用镜像不需要删除新增列；暂停糖果题计划后再使用旧应用，避免旧版 runner 把它当连接测试运行。正式卸载检测功能应先禁用或删除 `test_kind = candy_v1` 的计划。
+
+### hz 代理配置
+
+`code.gogoais.com` 的 Nginx Proxy Manager → Settings → Custom Nginx Configuration：
+
+```nginx
+# Allow scheduled reasoning probes to finish (application deadline: 180s).
+proxy_read_timeout 240s;
+proxy_send_timeout 240s;
+```
+
+用于允许手动检测接口在模型思考期间等待完整响应。前端请求超时为 210 秒。hz 当前 Compose 镜像为 `sub2api-staging:hz-quality-20261017`。
