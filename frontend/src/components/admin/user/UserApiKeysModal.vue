@@ -356,6 +356,7 @@ const appStore = useAppStore()
 const apiKeys = ref<ApiKey[]>([])
 const allGroups = ref<AdminGroup[]>([])
 const loading = ref(false)
+let requestVersion = 0
 const updatingKeyIds = ref(new Set<number>())
 const groupSelectorKeyId = ref<number | null>(null)
 const dropdownPosition = ref<{ top: number; left: number } | null>(null)
@@ -387,7 +388,10 @@ const selectedKeyForGroup = computed(() => {
   return apiKeys.value.find((k) => k.id === groupSelectorKeyId.value) || null
 })
 
-watch(() => props.show, (v) => {
+watch(() => [props.show, props.user?.id] as const, ([v], _, onCleanup) => {
+  onCleanup(() => { requestVersion++ })
+  closeGroupSelector()
+  closeKeyFormDialog()
   if (v && props.user) {
     load()
     loadGroups()
@@ -407,15 +411,19 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 
 const load = async () => {
   if (!props.user) return
+  const version = ++requestVersion
+  apiKeys.value = []
   loading.value = true
   groupButtonRefs.value.clear()
   try {
     const res = await adminAPI.users.getUserApiKeys(props.user.id)
-    apiKeys.value = res.items || []
-  } catch (error: any) {
-    appStore.showError(error?.message || t('admin.users.failedToLoadApiKeys'))
+    if (version === requestVersion) apiKeys.value = res.items || []
+  } catch (error) {
+    if (version !== requestVersion) return
+    console.error('Failed to load API keys:', error)
+		appStore.showError(error instanceof Error ? error.message : t('admin.users.failedToLoadApiKeys'))
   } finally {
-    loading.value = false
+    if (version === requestVersion) loading.value = false
   }
 }
 
