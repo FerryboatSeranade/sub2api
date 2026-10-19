@@ -649,14 +649,20 @@ func ProvideGeminiCachedContentService(repo GeminiCachedContentRepository, compa
 
 // ProvideScheduledTestService creates ScheduledTestService.
 func ProvideScheduledTestService(
+	db *sql.DB,
 	planRepo ScheduledTestPlanRepository,
 	resultRepo ScheduledTestResultRepository,
+	accountRepo AccountRepository,
 ) *ScheduledTestService {
-	return NewScheduledTestService(planRepo, resultRepo)
+	svc := NewScheduledTestService(planRepo, resultRepo)
+	svc.accountRepo = accountRepo
+	svc.db = db
+	return svc
 }
 
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
 func ProvideScheduledTestRunnerService(
+	db *sql.DB,
 	planRepo ScheduledTestPlanRepository,
 	scheduledSvc *ScheduledTestService,
 	accountTestSvc *AccountTestService,
@@ -664,6 +670,7 @@ func ProvideScheduledTestRunnerService(
 	cfg *config.Config,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
+	svc.db = db
 	svc.Start()
 	return svc
 }

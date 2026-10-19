@@ -168,3 +168,7 @@ issues/
 
 # Host credentials and migration artifacts
 deploy/.hz-private/
+
+# Private single-host release state (contains application data and credentials)
+/deploy/.bluegreen/
+/deploy/__pycache__/

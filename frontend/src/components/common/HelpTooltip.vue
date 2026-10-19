@@ -105,6 +105,8 @@ onBeforeUnmount(() => {
   <div
     ref="trigger"
     class="group relative ml-1 inline-flex items-center align-middle"
+    @focusin="openTooltip"
+    @focusout="closeTooltip"
     @mouseenter="onEnter"
     @mouseleave="onLeave"
     @click="onClick"

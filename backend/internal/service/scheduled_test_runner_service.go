@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +19,7 @@ const scheduledTestDefaultMaxWorkers = 10
 
 // ScheduledTestRunnerService periodically scans due test plans and executes them.
 type ScheduledTestRunnerService struct {
+	db             *sql.DB
 	planRepo       ScheduledTestPlanRepository
 	scheduledSvc   *ScheduledTestService
 	accountTestSvc *AccountTestService
@@ -89,6 +94,9 @@ func (s *ScheduledTestRunnerService) Stop() {
 }
 
 func (s *ScheduledTestRunnerService) runScheduled() {
+	if !scheduledDeploymentActive() {
+		return
+	}
 	// Delay 10s so execution lands at ~:10 of each minute instead of :00.
 	time.Sleep(10 * time.Second)
 
@@ -124,7 +132,7 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 }
 
 func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) {
-	if _, err := s.ExecutePlan(ctx, plan); err != nil {
+	if _, err := s.executePlan(ctx, plan, true); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d execution error: %v", plan.ID, err)
 	}
 }
@@ -132,10 +140,37 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 // ExecutePlan is shared by scheduled and manual runs. The account lock prevents
 // overlapping probes on one account; the cron guard prevents overlapping scans.
 func (s *ScheduledTestRunnerService) ExecutePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestResult, error) {
+	return s.executePlan(ctx, plan, false)
+}
+
+func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *ScheduledTestPlan, scheduled bool) (*ScheduledTestResult, error) {
 	if _, loaded := s.running.LoadOrStore(plan.AccountID, true); loaded {
 		return nil, fmt.Errorf("account test already running")
 	}
 	defer s.running.Delete(plan.AccountID)
+	if s.db != nil {
+		release, acquired, err := lockScheduledAccount(ctx, s.db, plan.AccountID)
+		if err != nil {
+			return nil, err
+		}
+		if !acquired {
+			return nil, fmt.Errorf("account test already running on another instance")
+		}
+		defer release()
+	}
+	if scheduled {
+		if !scheduledDeploymentActive() {
+			return nil, nil
+		}
+		fresh, err := s.planRepo.GetByID(ctx, plan.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !fresh.Enabled || fresh.NextRunAt == nil || fresh.NextRunAt.After(time.Now()) {
+			return nil, nil
+		}
+		plan = fresh
+	}
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 	var result *ScheduledTestResult
@@ -200,4 +235,37 @@ func (s *ScheduledTestRunnerService) tryRecoverAccount(ctx context.Context, acco
 	if recovery.ClearedRateLimit {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d auto-recover: account=%d cleared rate-limit/runtime state", planID, accountID)
 	}
+}
+
+// An optional owner marker lets a warm/draining blue-green instance skip cron scans.
+func scheduledDeploymentActive() bool {
+	slot := os.Getenv("SUB2API_DEPLOYMENT_SLOT")
+	file := os.Getenv("SUB2API_SCHEDULER_OWNER_FILE")
+	if slot == "" || file == "" {
+		return true
+	}
+	data, err := os.ReadFile(file)
+	return err == nil && strings.TrimSpace(string(data)) == slot
+}
+
+func lockScheduledAccount(ctx context.Context, db *sql.DB, accountID int64) (func(), bool, error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	key := int64(7319000000000000) + accountID
+	var acquired bool
+	if err = conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&acquired); err != nil || !acquired {
+		conn.Close()
+		return nil, false, err
+	}
+	return func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := conn.ExecContext(releaseCtx, "SELECT pg_advisory_unlock($1)", key)
+		if err != nil { // Discard a session whose lock release is uncertain.
+			conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+		conn.Close()
+	}, true, nil
 }

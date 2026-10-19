@@ -15,7 +15,7 @@
         "sub2api-staging-network"
       ],
       "ports": [
-        "${HZ_BIND_HOST:-0.0.0.0}:8081:8080"
+        "127.0.0.1:28081:8080"
       ],
       "volumes": [
         "./staging/data:/app/data"

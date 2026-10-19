@@ -94,7 +94,12 @@ export async function reasoningOverview(): Promise<ReasoningOverviewItem[]> {
   return data ?? []
 }
 
+export async function setReasoningPolicy(accountId: number, enabled: boolean): Promise<void> {
+ await apiClient.put(`/admin/accounts/${accountId}/reasoning-policy`, { enabled })
+}
+
 export const scheduledTestsAPI = {
+ setReasoningPolicy,
   reasoningOverview,
   runNow,
   listByAccount,

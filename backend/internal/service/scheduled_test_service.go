@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -12,8 +13,10 @@ var scheduledTestCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom 
 
 // ScheduledTestService provides CRUD operations for scheduled test plans and results.
 type ScheduledTestService struct {
-	planRepo   ScheduledTestPlanRepository
-	resultRepo ScheduledTestResultRepository
+	db          *sql.DB
+	planRepo    ScheduledTestPlanRepository
+	resultRepo  ScheduledTestResultRepository
+	accountRepo AccountRepository
 }
 
 // NewScheduledTestService creates a new ScheduledTestService.
@@ -98,6 +101,15 @@ func (s *ScheduledTestService) SaveResult(ctx context.Context, planID int64, max
 	}
 	*result = *saved
 	EvaluateReasoningProbe(result)
+	if result.TestKind == ScheduledTestCandyV1 && s.accountRepo != nil {
+		plan, err := s.planRepo.GetByID(ctx, planID)
+		if err != nil {
+			return err
+		}
+		if err := s.accountRepo.UpdateExtra(ctx, plan.AccountID, reasoningSnapshot(result)); err != nil {
+			return err
+		}
+	}
 	return s.resultRepo.PruneOldResults(ctx, planID, maxResults)
 }
 

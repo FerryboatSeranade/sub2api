@@ -290,7 +290,13 @@
           <template #cell-status="{ row }">
             <div class="flex items-center gap-1.5">
               <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+              <HelpTooltip v-if="row.status === 'error' || row.rate_limit_reset_at || row.overload_until || row.temp_unschedulable_until || row.extra?.model_rate_limits" :content="t('admin.accounts.reasoning.recoverHint')">
+                <template #trigger><button class="btn btn-secondary px-2 py-1 text-xs" :disabled="recoveryBusy !== null" @click="forceRecover(row)">{{ t('admin.accounts.reasoning.recover') }}</button></template>
+              </HelpTooltip>
             </div>
+          </template>
+          <template #cell-reasoning="{ row }">
+            <AccountReasoningCell :account="row" :result="reasoningResults[row.id] ?? null" :load-error="reasoningLoadError" :busy="reasoningBusy !== null" @policy="setReasoningPolicy(row, $event)" />
           </template>
           <template #cell-schedulable="{ row }">
             <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
@@ -460,7 +466,7 @@
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <ReasoningProbeOverview :show="showReasoningOverview" @close="showReasoningOverview = false" />
+    <ReasoningProbeOverview :show="showReasoningOverview" @close="showReasoningOverview = false; loadReasoningResults()" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
@@ -520,6 +526,39 @@ import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import ReasoningProbeOverview from '@/components/admin/account/ReasoningProbeOverview.vue'
+import AccountReasoningCell from '@/components/admin/account/AccountReasoningCell.vue'
+import type { ReasoningOverviewItem } from '@/api/admin/scheduledTests'
+const reasoningResults = ref<Record<number, ReasoningOverviewItem['result']>>({})
+const reasoningLoadError = ref(false)
+const reasoningBusy = ref<number | null>(null)
+const recoveryBusy = ref<number | null>(null)
+const loadReasoningResults = async () => {
+ try {
+  const items = await adminAPI.scheduledTests.reasoningOverview()
+  const next: Record<number, ReasoningOverviewItem['result']> = {}
+  for (const item of items) {
+   if (item.result && (!next[item.account_id] || item.result.id > next[item.account_id]!.id)) next[item.account_id] = item.result
+  }
+  reasoningResults.value = next
+  reasoningLoadError.value = false
+ } catch { reasoningLoadError.value = true }
+}
+const setReasoningPolicy = async (row: AccountListItem, enabled: boolean) => {
+ if (reasoningBusy.value !== null) return
+ reasoningBusy.value = row.id
+ try {
+  await adminAPI.scheduledTests.setReasoningPolicy(row.id, enabled)
+  row.extra = { ...row.extra, reasoning_auto_exclude: enabled }
+  appStore.showSuccess(t('admin.accounts.reasoning.saved'))
+ } catch { appStore.showError(t('admin.accounts.reasoning.saveFailed')) }
+ finally { reasoningBusy.value = null }
+}
+const forceRecover = async (row: AccountListItem) => {
+ if (recoveryBusy.value !== null || !window.confirm(t('admin.accounts.reasoning.recoverConfirm', { name: row.name }))) return
+ recoveryBusy.value = row.id
+ try { await handleRecoverState(row) } finally { recoveryBusy.value = null }
+}
+
 const showReasoningOverview = ref(false)
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
@@ -1170,6 +1209,7 @@ const load = async (options: AccountLoadOptions = {}) => {
   pendingTodayStatsRefresh.value = false
   requestParams.lite = '1'
   await baseLoad()
+  await loadReasoningResults()
   if (options.refreshTodayStats !== false) await refreshTodayStatsBatch()
 }
 
@@ -1179,6 +1219,7 @@ const reload = async () => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = false
   await baseReload()
+  await loadReasoningResults()
   await refreshTodayStatsBatch()
 }
 
@@ -1796,6 +1837,7 @@ const allColumns = computed(() => {
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
+    { key: 'reasoning', label: t('admin.accounts.reasoning.column'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
@@ -2369,7 +2411,7 @@ const handleRefresh = async (a: Account) => {
     console.error('Failed to refresh credentials:', error)
   }
 }
-const handleRecoverState = async (a: Account) => {
+const handleRecoverState = async (a: Pick<Account, 'id'>) => {
   try {
     const updated = await adminAPI.accounts.recoverState(a.id)
     patchAccountInList(updated)
