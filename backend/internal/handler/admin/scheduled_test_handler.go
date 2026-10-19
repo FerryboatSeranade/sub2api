@@ -208,14 +208,37 @@ func (h *ScheduledTestHandler) SetReasoningPolicy(c *gin.Context) {
 		return
 	}
 	var body struct {
+		Policy string `json:"policy"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Policy == "" {
+		response.BadRequest(c, "policy required")
+		return
+	}
+	if err := h.scheduledTestSvc.SetReasoningPolicy(c.Request.Context(), id, body.Policy); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"policy": body.Policy})
+}
+
+func (h *ScheduledTestHandler) GetReasoningGlobal(c *gin.Context) {
+	enabled, err := h.scheduledTestSvc.GetReasoningGlobal(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"enabled": enabled})
+}
+func (h *ScheduledTestHandler) SetReasoningGlobal(c *gin.Context) {
+	var body struct {
 		Enabled *bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.Enabled == nil {
 		response.BadRequest(c, "enabled boolean required")
 		return
 	}
-	if err := h.scheduledTestSvc.SetReasoningPolicy(c.Request.Context(), id, *body.Enabled); err != nil {
-		response.BadRequest(c, err.Error())
+	if err := h.scheduledTestSvc.SetReasoningGlobal(c.Request.Context(), *body.Enabled); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"enabled": *body.Enabled})

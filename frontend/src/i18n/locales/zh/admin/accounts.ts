@@ -1,6 +1,10 @@
 export default {
     accounts: {
-      reasoning: {"column": "降智状态", "not_degraded": "不降智", "degraded": "降智", "inconclusive": "检测失败 / 无法判定", "untested": "未检测", "loadError": "状态加载失败", "notApplicable": "不适用", "autoExclude": "降智自动排除", "excluded": "已因降智排除调度", "rule": "按最近一次糖果题检测是否包含数字 21 判定，仅代表该次测试", "policyHint": "仅排除最近检测明确降智的账号；新结果不降智或无法判定时解除此项排除，不改变手动暂停状态", "saved": "自动排除设置已保存", "saveFailed": "保存失败，请重试", "recover": "强制恢复", "recoverHint": "清除本地限流及可恢复异常；上游配额不会重置，仍限流时会再次触发", "recoverConfirm": "强制恢复账号“{name}”的本地限流及可恢复异常状态？这不会恢复上游额度，也不会取消手动暂停或降智排除。"},
+      reasoning: {
+    globalSwitch: '自动排除降智账号',
+    globalHint: '跟随全局的账号使用此开关；独立启用/关闭优先。只排除最近明确判为降智的账号。',
+    inherit: '跟随全局', alwaysEnabled: '始终排除降智', alwaysDisabled: '不自动排除',
+"column": "降智状态", "not_degraded": "不降智", "degraded": "降智", "inconclusive": "检测失败 / 无法判定", "untested": "未检测", "loadError": "状态加载失败", "notApplicable": "不适用", "autoExclude": "降智自动排除", "excluded": "已因降智排除调度", "rule": "按最近一次糖果题检测是否包含数字 21 判定，仅代表该次测试", "policyHint": "仅排除最近检测明确降智的账号；新结果不降智或无法判定时解除此项排除，不改变手动暂停状态", "saved": "自动排除设置已保存", "saveFailed": "保存失败，请重试", "recover": "强制恢复", "recoverHint": "清除本地限流及可恢复异常；上游配额不会重置，仍限流时会再次触发", "recoverConfirm": "强制恢复账号“{name}”的本地限流及可恢复异常状态？这不会恢复上游额度，也不会取消手动暂停或降智排除。"},
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',

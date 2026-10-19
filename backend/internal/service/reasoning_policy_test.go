@@ -58,3 +58,30 @@ func TestScheduledAccountLockContentionAndRelease(t *testing.T) {
 	release()
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestReasoningPolicyGlobalOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		mode         string
+		global, want bool
+	}{
+		{"inherit", false, false}, {"inherit", true, true}, {"enabled", false, true}, {"enabled", true, true}, {"disabled", true, false}, {"disabled", false, false},
+	} {
+		require.Equal(t, tc.want, reasoningPolicyEnabled(tc.mode, tc.global))
+	}
+}
+
+func TestReasoningPolicyTransactionRollback(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	svc := &ScheduledTestService{db: db}
+	mock.ExpectBegin()
+	mock.ExpectExec("SELECT pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT COALESCE").WithArgs(ReasoningGlobalKey).WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(true))
+	mock.ExpectExec("UPDATE accounts SET extra").WithArgs("disabled", int64(18)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE accounts SET extra").WithArgs(true, int64(18)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO scheduler_outbox").WithArgs(int64(18)).WillReturnError(context.Canceled)
+	mock.ExpectRollback()
+	require.ErrorIs(t, svc.updateReasoningPolicy(context.Background(), 18, "disabled", nil, nil), context.Canceled)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

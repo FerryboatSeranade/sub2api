@@ -4,10 +4,11 @@ import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import type { AccountListItem } from '@/types'
 import type { ReasoningOverviewItem } from '@/api/admin/scheduledTests'
-const props = defineProps<{ account: AccountListItem; result: ReasoningOverviewItem['result']; loadError: boolean; busy: boolean }>()
-const emit = defineEmits<{ policy: [enabled: boolean] }>()
+const props = defineProps<{ account: AccountListItem; result: ReasoningOverviewItem['result']; loadError: boolean; busy: boolean; globalEnabled?: boolean }>()
+const emit = defineEmits<{ policy: [mode: string] }>()
 const { t } = useI18n()
-const enabled = computed(() => props.account.extra?.reasoning_auto_exclude === true)
+const mode = computed(() => String(props.account.extra?.reasoning_exclusion_policy ?? (props.account.extra?.reasoning_auto_exclude === true ? 'enabled' : 'inherit')))
+const enabled = computed(() => mode.value === 'enabled' || (mode.value === 'inherit' && props.globalEnabled === true))
 const verdict = computed(() => props.loadError ? 'loadError' : props.result?.quality?.verdict ?? 'untested')
 const label = computed(() => t(`admin.accounts.reasoning.${verdict.value}`))
 const color = computed(() => verdict.value === 'degraded' ? 'text-red-600' : verdict.value === 'not_degraded' ? 'text-emerald-600' : 'text-gray-500')
@@ -21,10 +22,11 @@ const checkedAt = computed(() => props.result ? new Date(props.result.finished_a
   <span v-if="checkedAt" class="text-[10px] text-gray-500">{{ checkedAt }}</span>
   <HelpTooltip :content="t('admin.accounts.reasoning.policyHint')">
    <template #trigger>
-    <label class="inline-flex cursor-pointer items-center gap-1.5">
-     <input type="checkbox" :checked="enabled" :disabled="busy" :aria-label="t('admin.accounts.reasoning.autoExclude')" @change="emit('policy', !enabled)" />
-     {{ t('admin.accounts.reasoning.autoExclude') }}
-    </label>
+    <select :value="mode" :disabled="busy" :aria-label="t('admin.accounts.reasoning.autoExclude')" class="rounded border border-gray-300 bg-transparent px-1 py-1 dark:border-gray-600" @change="emit('policy', ($event.target as HTMLSelectElement).value)">
+     <option value="inherit">{{ t('admin.accounts.reasoning.inherit') }}</option>
+     <option value="enabled">{{ t('admin.accounts.reasoning.alwaysEnabled') }}</option>
+     <option value="disabled">{{ t('admin.accounts.reasoning.alwaysDisabled') }}</option>
+    </select>
    </template>
   </HelpTooltip>
   <span v-if="enabled && verdict === 'degraded'" class="text-red-600">{{ t('admin.accounts.reasoning.excluded') }}</span>

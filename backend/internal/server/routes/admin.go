@@ -741,6 +741,8 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 	// Nested under accounts
 	admin.GET("/accounts/:id/scheduled-test-plans", h.Admin.ScheduledTest.ListByAccount)
+	admin.GET("/scheduled-test-plans/reasoning-policy", h.Admin.ScheduledTest.GetReasoningGlobal)
+	admin.PUT("/scheduled-test-plans/reasoning-policy", h.Admin.ScheduledTest.SetReasoningGlobal)
 	admin.PUT("/accounts/:id/reasoning-policy", h.Admin.ScheduledTest.SetReasoningPolicy)
 }
 

@@ -94,11 +94,20 @@ export async function reasoningOverview(): Promise<ReasoningOverviewItem[]> {
   return data ?? []
 }
 
-export async function setReasoningPolicy(accountId: number, enabled: boolean): Promise<void> {
- await apiClient.put(`/admin/accounts/${accountId}/reasoning-policy`, { enabled })
+export async function setReasoningPolicy(accountId: number, policy: string): Promise<void> {
+ await apiClient.put(`/admin/accounts/${accountId}/reasoning-policy`, { policy })
 }
 
+export async function getReasoningGlobal(): Promise<boolean> {
+ const { data } = await apiClient.get('/admin/scheduled-test-plans/reasoning-policy')
+ return data.enabled === true
+}
+export async function setReasoningGlobal(enabled: boolean): Promise<void> {
+ await apiClient.put('/admin/scheduled-test-plans/reasoning-policy', { enabled })
+}
 export const scheduledTestsAPI = {
+ getReasoningGlobal,
+ setReasoningGlobal,
  setReasoningPolicy,
   reasoningOverview,
   runNow,

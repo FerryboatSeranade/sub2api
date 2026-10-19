@@ -74,11 +74,13 @@ def compose(slot, image):
     # Resolve immutable image ID before preparing a release.
     image_id = json.loads(subprocess.check_output(['docker','image','inspect',image]))[0]['Id']
     data = STATE/('data-'+slot)
+    source = STATE/('data-'+load()['active'])
+    if not source.exists(): source = DEPLOY/'staging/data'
     if not data.exists():
         data.mkdir()
-        run('cp','-a',str(DEPLOY/'staging/data')+'/.',str(data))
-        shutil.copystat(DEPLOY/'staging/data',data)
-        stat=(DEPLOY/'staging/data').stat();os.chown(data,stat.st_uid,stat.st_gid)
+        run('cp','-a',str(source)+'/.',str(data))
+        shutil.copystat(source,data)
+        stat=source.stat();os.chown(data,stat.st_uid,stat.st_gid)
     doc={'services':{slot:{'image':image_id,'container_name':'sub2api-'+slot,'restart':'unless-stopped',
       'env_file':[{'path':str(DEPLOY/'.hz-private/sub2api.env'),'format':'raw'}],
       'environment':{'SUB2API_DEPLOYMENT_SLOT':slot,'SUB2API_SCHEDULER_OWNER_FILE':'/app/deployment/scheduler-owner'},
@@ -156,8 +158,9 @@ def switch(slot):
     except Exception:
         write_proxy(old);proxy_validate();run('docker','exec',PROXY,'nginx','-s','reload');raise
     s['active']=slot;s['draining']=old;s.pop('drain_not_before',None);save(s)
-    # Pause new scans while old streams/jobs drain. The legacy version ignores this marker.
-    owner('none')
+    # Modern slots honor owner and share account advisory locks; resume the new
+    # scheduler immediately. Legacy overlap still needs the conservative pause.
+    owner('none' if s['slots'][old].get('legacy') else slot)
     print('Traffic switched to',slot,'; old slot',old,'kept running. Run drain to finish.')
 
 def drain():
@@ -179,7 +182,15 @@ def drain():
 
 def main():
     os.umask(0o077);STATE.mkdir(parents=True,exist_ok=True)
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['init','prepare','bootstrap','switch','drain','status']);parser.add_argument('args',nargs='*');args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('command',choices=['init','prepare','bootstrap','switch','drain','finish','status']);parser.add_argument('args',nargs='*');args=parser.parse_args()
+    if args.command=='finish':
+        # Reacquire the release lock per iteration so rollback remains available.
+        deadline=time.time()+3900
+        while load().get('draining'):
+            if time.time()>deadline: raise RuntimeError('drain deadline exceeded; inspect old connections')
+            run('python3',str(Path(__file__).resolve()),'drain')
+            if load().get('draining'): time.sleep(30)
+        return
     with (STATE/'release.lock').open('w') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         if args.command=='init':init()

@@ -106,7 +106,7 @@ func (s *ScheduledTestService) SaveResult(ctx context.Context, planID int64, max
 		if err != nil {
 			return err
 		}
-		if err := s.accountRepo.UpdateExtra(ctx, plan.AccountID, reasoningSnapshot(result)); err != nil {
+		if err := s.saveReasoningSnapshot(ctx, plan.AccountID, result); err != nil {
 			return err
 		}
 	}

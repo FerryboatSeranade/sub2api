@@ -17,6 +17,10 @@
             @create="showCreate = true"
           >
             <template #after>
+              <HelpTooltip :content="t('admin.accounts.reasoning.globalHint')"><template #trigger>
+                <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" :checked="reasoningGlobal" :disabled="reasoningGlobalBusy || reasoningGlobalError" @change="setReasoningGlobal(!reasoningGlobal)" />{{ t('admin.accounts.reasoning.globalSwitch') }}</label>
+              </template></HelpTooltip>
+              <span v-if="reasoningGlobalError" class="text-xs text-red-600">{{ t('admin.accounts.reasoning.loadError') }}</span>
               <button class="btn btn-secondary" @click="showReasoningOverview = true" :title="t('admin.scheduledTests.overview')">{{ t('admin.scheduledTests.overview') }}</button>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
@@ -296,7 +300,7 @@
             </div>
           </template>
           <template #cell-reasoning="{ row }">
-            <AccountReasoningCell :account="row" :result="reasoningResults[row.id] ?? null" :load-error="reasoningLoadError" :busy="reasoningBusy !== null" @policy="setReasoningPolicy(row, $event)" />
+            <AccountReasoningCell :account="row" :result="reasoningResults[row.id] ?? null" :global-enabled="reasoningGlobal" :load-error="reasoningLoadError" :busy="reasoningBusy !== null" @policy="setReasoningPolicy(row, $event)" />
           </template>
           <template #cell-schedulable="{ row }">
             <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
@@ -530,10 +534,25 @@ import AccountReasoningCell from '@/components/admin/account/AccountReasoningCel
 import type { ReasoningOverviewItem } from '@/api/admin/scheduledTests'
 const reasoningResults = ref<Record<number, ReasoningOverviewItem['result']>>({})
 const reasoningLoadError = ref(false)
+const reasoningGlobal = ref(false)
+const reasoningGlobalBusy = ref(false)
+const reasoningGlobalError = ref(true)
+const setReasoningGlobal = async (enabled: boolean) => {
+ if (reasoningGlobalBusy.value) return
+ reasoningGlobalBusy.value = true
+ try {
+  await adminAPI.scheduledTests.setReasoningGlobal(enabled)
+  reasoningGlobal.value = enabled
+  await load()
+  appStore.showSuccess(t('admin.accounts.reasoning.saved'))
+ } catch { appStore.showError(t('admin.accounts.reasoning.saveFailed')) }
+ finally { reasoningGlobalBusy.value = false }
+}
 const reasoningBusy = ref<number | null>(null)
 const recoveryBusy = ref<number | null>(null)
 const loadReasoningResults = async () => {
  try {
+  try { reasoningGlobal.value = await adminAPI.scheduledTests.getReasoningGlobal(); reasoningGlobalError.value = false } catch { reasoningGlobalError.value = true }
   const items = await adminAPI.scheduledTests.reasoningOverview()
   const next: Record<number, ReasoningOverviewItem['result']> = {}
   for (const item of items) {
@@ -543,12 +562,12 @@ const loadReasoningResults = async () => {
   reasoningLoadError.value = false
  } catch { reasoningLoadError.value = true }
 }
-const setReasoningPolicy = async (row: AccountListItem, enabled: boolean) => {
+const setReasoningPolicy = async (row: AccountListItem, policy: string) => {
  if (reasoningBusy.value !== null) return
  reasoningBusy.value = row.id
  try {
-  await adminAPI.scheduledTests.setReasoningPolicy(row.id, enabled)
-  row.extra = { ...row.extra, reasoning_auto_exclude: enabled }
+  await adminAPI.scheduledTests.setReasoningPolicy(row.id, policy)
+  row.extra = { ...row.extra, reasoning_exclusion_policy: policy, reasoning_auto_exclude: policy === 'enabled' || (policy === 'inherit' && reasoningGlobal.value) }
   appStore.showSuccess(t('admin.accounts.reasoning.saved'))
  } catch { appStore.showError(t('admin.accounts.reasoning.saveFailed')) }
  finally { reasoningBusy.value = null }

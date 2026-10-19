@@ -16,8 +16,14 @@ describe('account reasoning policy', () => {
   expect(mount('degraded', true).text()).toContain('reasoning.excluded')
  })
  it('emits opt-in without changing the manual scheduling flag', async () => {
-  const w=mount('degraded');await w.find('input').setValue(true)
-  expect(w.emitted('policy')).toEqual([[true]])
+  const w=mount('degraded');await w.find('select').setValue('enabled')
+  expect(w.emitted('policy')).toEqual([['enabled']])
+ })
+ it('inherits global and allows an explicit opt-out', async () => {
+  const w=mount('degraded'); await w.setProps({globalEnabled:true})
+  expect(w.text()).toContain('reasoning.excluded')
+  await w.setProps({account:{id:1,platform:'openai',extra:{reasoning_exclusion_policy:'disabled'}} as AccountListItem})
+  expect(w.text()).not.toContain('reasoning.excluded')
  })
  it('shows a fetch error rather than falsely displaying untested', async () => {
   const w=mount(null);await w.setProps({loadError:true})

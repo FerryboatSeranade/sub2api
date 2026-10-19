@@ -1,6 +1,10 @@
 export default {
     accounts: {
-      reasoning: {"column": "Reasoning status", "not_degraded": "Not degraded", "degraded": "Degraded", "inconclusive": "Failed / inconclusive", "untested": "Untested", "loadError": "Status unavailable", "notApplicable": "Not applicable", "autoExclude": "Auto-exclude degraded", "excluded": "Excluded by reasoning policy", "rule": "Latest candy probe: a standalone 21 passes; this is a single-test heuristic", "policyHint": "Exclude only a degraded latest result. A passing or inconclusive result releases this policy; manual pause remains unchanged", "saved": "Exclusion policy saved", "saveFailed": "Could not save. Please retry", "recover": "Force recovery", "recoverHint": "Clear local rate limits and recoverable errors; upstream quota is unchanged and may limit again", "recoverConfirm": "Clear local rate limits and recoverable errors for “{name}”? Upstream quota, manual pause and reasoning exclusion remain unchanged."},
+      reasoning: {
+    globalSwitch: 'Auto-exclude degraded accounts',
+    globalHint: 'Applies to inherited policies. Per-account overrides take precedence. Only explicit degraded results exclude accounts.',
+    inherit: 'Follow global', alwaysEnabled: 'Always exclude degraded', alwaysDisabled: 'Never auto-exclude',
+"column": "Reasoning status", "not_degraded": "Not degraded", "degraded": "Degraded", "inconclusive": "Failed / inconclusive", "untested": "Untested", "loadError": "Status unavailable", "notApplicable": "Not applicable", "autoExclude": "Auto-exclude degraded", "excluded": "Excluded by reasoning policy", "rule": "Latest candy probe: a standalone 21 passes; this is a single-test heuristic", "policyHint": "Exclude only a degraded latest result. A passing or inconclusive result releases this policy; manual pause remains unchanged", "saved": "Exclusion policy saved", "saveFailed": "Could not save. Please retry", "recover": "Force recovery", "recoverHint": "Clear local rate limits and recoverable errors; upstream quota is unchanged and may limit again", "recoverConfirm": "Clear local rate limits and recoverable errors for “{name}”? Upstream quota, manual pause and reasoning exclusion remain unchanged."},
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
