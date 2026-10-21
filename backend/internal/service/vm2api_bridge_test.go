@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/DATA-DOG/go-sqlmock"
 	"net/http"
 	"net/http/httptest"
@@ -125,6 +126,10 @@ func TestVMBridgeCommitAtomicSwitch(t *testing.T) {
 	mock.ExpectQuery("SELECT id FROM accounts").WithArgs(bridgeName("identity")).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery("INSERT INTO accounts").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(90))
 	mock.ExpectExec("INSERT INTO account_groups").WithArgs(int64(90), int64(10)).WillReturnResult(sqlmock.NewResult(0, 1))
+	for _, id := range []int64{47, 90} {
+		mock.ExpectQuery("SELECT pg_try_advisory_xact_lock").WithArgs(int64(7319000000000000) + id).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	}
+	mock.ExpectExec("UPDATE scheduled_test_plans SET account_id").WithArgs(int64(90), int64(47)).WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectExec("UPDATE accounts SET status='inactive'").WithArgs(int64(47)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE accounts SET status='inactive'").WithArgs(int64(67)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE accounts SET extra=jsonb_set").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -200,5 +205,54 @@ func TestVMBridgeNewSlotFailedSmokeNeverCutsOver(t *testing.T) {
 	}
 	if e = mock.ExpectationsWereMet(); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestVMBridgePlanMigration(t *testing.T) {
+	for _, busy := range []bool{false, true} {
+		t.Run(fmt.Sprint("busy=", busy), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectBegin()
+			mock.ExpectQuery("SELECT pg_try_advisory_xact_lock").WithArgs(int64(7319000000000047)).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(!busy))
+			if !busy {
+				mock.ExpectQuery("SELECT pg_try_advisory_xact_lock").WithArgs(int64(7319000000000068)).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+				mock.ExpectExec("UPDATE scheduled_test_plans SET account_id").WithArgs(int64(68), int64(47)).WillReturnResult(sqlmock.NewResult(0, 2))
+			}
+			mock.ExpectRollback()
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = migrateVMBridgePlans(context.Background(), tx, 47, 68)
+			if (err != nil) != busy {
+				t.Fatalf("unexpected migration result: %v", err)
+			}
+			tx.Rollback()
+			if err = mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+type movedVMBridgePlanRepo struct{ ScheduledTestPlanRepository }
+
+func (movedVMBridgePlanRepo) GetByID(context.Context, int64) (*ScheduledTestPlan, error) {
+	return &ScheduledTestPlan{ID: 1, AccountID: 68}, nil
+}
+func TestVMBridgeQueuedPlanCannotRunOnOldAccount(t *testing.T) {
+	s := NewScheduledTestRunnerService(movedVMBridgePlanRepo{}, nil, nil, nil, nil)
+	if cap(s.reasoningSlots) != 10 {
+		t.Fatal("reasoning concurrency must be 10")
+	}
+	for _, scheduled := range []bool{true, false} {
+		_, err := s.executePlan(context.Background(), &ScheduledTestPlan{ID: 1, AccountID: 47}, scheduled)
+		if err == nil || !strings.Contains(err.Error(), "moved") {
+			t.Fatalf("stale plan not rejected: %v", err)
+		}
 	}
 }

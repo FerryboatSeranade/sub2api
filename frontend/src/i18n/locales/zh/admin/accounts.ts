@@ -1,6 +1,6 @@
 export default {
     accounts: {
- vmBridge: {"title": "转入 / 同步到 vm2api", "description": "创建或更新专属容器与 Key，真实 API 测试通过后创建 vm2api 账号并关闭原账号直接调度；失败不会执行新旧账号切换。", "limits": "Sub2API 账号 2 并发 → 专属 Key 2 并发 → 专属容器 2 并发", "groups": "同时继承原账号分组", "groupsHint": "始终加入 vm2api-hz。勾选后额外加入原账号的 OpenAI 分组；已有目标账号的分组保留。", "background": "任务在后台运行，关闭窗口不会取消。重试会核对已有资源；共享入口会移除该容器，清空后停用。", "start": "确认并同步", "running": "同步进行中", "completed": "同步成功", "failed": "同步失败，可重试", "interrupted": "任务中断，可重试", "container": "容器", "target": "新账号", "unconfigured": "服务器尚未配置 vm2api 集成", "loadFailed": "读取进度失败，请刷新后再操作", "startFailed": "提交未确认，请刷新进度，避免重复操作"},
+ vmBridge: {"linked": "已关联 vm2api；点击更新凭证与同步计划", "plans": "同步成功时，原账号的全部定时测试计划和历史记录迁移到新账号；保留原启用状态，原账号不再执行这些计划。","title": "转入 / 同步到 vm2api", "description": "创建或更新专属容器与 Key，真实 API 测试通过后创建 vm2api 账号并关闭原账号直接调度；失败不会执行新旧账号切换。", "limits": "Sub2API 账号 2 并发 → 专属 Key 2 并发 → 专属容器 2 并发", "groups": "同时继承原账号分组", "groupsHint": "始终加入 vm2api-hz。勾选后额外加入原账号的 OpenAI 分组；已有目标账号的分组保留。", "background": "任务在后台运行，关闭窗口不会取消。重试会核对已有资源；共享入口会移除该容器，清空后停用。", "start": "确认并同步", "running": "同步进行中", "completed": "同步成功", "failed": "同步失败，可重试", "interrupted": "任务中断，可重试", "container": "容器", "target": "新账号", "unconfigured": "服务器尚未配置 vm2api 集成", "loadFailed": "读取进度失败，请刷新后再操作", "startFailed": "提交未确认，请刷新进度，避免重复操作"},
       reasoning: {
     globalSwitch: '自动排除降智账号',
     globalHint: '跟随全局的账号使用此开关；独立启用/关闭优先。只排除最近明确判为降智的账号。',

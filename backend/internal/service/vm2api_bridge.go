@@ -603,6 +603,9 @@ func (s *VM2APIBridge) commit(ctx context.Context, a *Account, st *VMBridgeState
 			return errors.New("继承分组失败")
 		}
 	}
+	if e = migrateVMBridgePlans(ctx, tx, a.ID, target); e != nil {
+		return e
+	}
 	// A single commit disables the original and enables the replacement; scheduler
 	// cache invalidation is durable in the same transaction.
 	if _, e = tx.ExecContext(ctx, "UPDATE accounts SET status='inactive',schedulable=false,concurrency=2,updated_at=now() WHERE id=$1", a.ID); e != nil {
@@ -635,4 +638,20 @@ func (s *VM2APIBridge) commit(ctx context.Context, a *Account, st *VMBridgeState
 	}
 	*st = completed
 	return nil
+}
+
+// Move plans in the cutover transaction, preserving IDs, history and enabled flags.
+// Shared advisory locks prevent moving a plan while its original probe is running.
+func migrateVMBridgePlans(ctx context.Context, tx *sql.Tx, source, target int64) error {
+	for _, id := range []int64{source, target} {
+		var acquired bool
+		if err := tx.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock($1)", int64(7319000000000000)+id).Scan(&acquired); err != nil {
+			return err
+		}
+		if !acquired {
+			return errors.New("账号定时测试正在运行，请结束后重试同步；原账号未切换")
+		}
+	}
+	_, err := tx.ExecContext(ctx, "UPDATE scheduled_test_plans SET account_id=$1,updated_at=now() WHERE account_id=$2", target, source)
+	return err
 }

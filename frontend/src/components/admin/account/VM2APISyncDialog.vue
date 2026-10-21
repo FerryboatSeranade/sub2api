@@ -20,6 +20,7 @@
       </div>
       <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
       <p v-if="!loading && !enabled" class="text-sm text-amber-600">{{ t('admin.accounts.vmBridge.unconfigured') }}</p>
+      <p class="text-xs text-gray-500">{{ t('admin.accounts.vmBridge.plans') }}</p>
       <p class="text-xs text-gray-500">{{ t('admin.accounts.vmBridge.background') }}</p>
     </div>
     <template #footer>

@@ -201,6 +201,7 @@
           ref="dataTableRef"
           :columns="cols"
           :data="accounts"
+          :row-class="(row) => row.extra?.vm2api_source_id ? 'vm2api-derived-row' : ''"
           :loading="loading"
           row-key="id"
           :server-side-sort="true"
@@ -447,7 +448,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <HelpTooltip v-if="row.platform === 'openai' && row.type === 'oauth' && !row.parent_account_id" :content="t('admin.accounts.vmBridge.description')"><template #trigger>
-                <button class="btn btn-secondary px-2 py-1 text-xs" @click="vmBridgeAccount = row">vm2api</button>
+                <button class="btn px-2 py-1 text-xs" :class="row.extra?.vm2api_bridge?.target_id ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'btn-secondary'" :title="t(row.extra?.vm2api_bridge?.target_id ? 'admin.accounts.vmBridge.linked' : 'admin.accounts.vmBridge.description')" @click="vmBridgeAccount = row">{{ row.extra?.vm2api_bridge?.target_id ? '✓ vm2api' : 'vm2api' }}</button>
               </template></HelpTooltip>
               <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
@@ -2666,4 +2667,11 @@ onUnmounted(() => {
 .account-tools-menu-icon {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
 }
+</style>
+
+<style scoped>
+:deep(tr.vm2api-derived-row > td) { background-color: #eff6ff; }
+:deep(tr.vm2api-derived-row:hover > td) { background-color: #dbeafe; }
+:global(.dark) :deep(tr.vm2api-derived-row > td) { background-color: #172337; }
+:global(.dark) :deep(tr.vm2api-derived-row:hover > td) { background-color: #1e304a; }
 </style>

@@ -47,7 +47,7 @@ func NewScheduledTestRunnerService(
 		accountTestSvc: accountTestSvc,
 		rateLimitSvc:   rateLimitSvc,
 		cfg:            cfg,
-		reasoningSlots: make(chan struct{}, 2),
+		reasoningSlots: make(chan struct{}, 10),
 	}
 }
 
@@ -158,13 +158,18 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 		}
 		defer release()
 	}
+	// Re-read after locking: a queued plan may have moved to a derived account.
+	fresh, err := s.planRepo.GetByID(ctx, plan.ID)
+	if err != nil {
+		return nil, err
+	}
+	if fresh.AccountID != plan.AccountID {
+		return nil, fmt.Errorf("test plan moved to another account; reload and retry")
+	}
+	plan = fresh
 	if scheduled {
 		if !scheduledDeploymentActive() {
 			return nil, nil
-		}
-		fresh, err := s.planRepo.GetByID(ctx, plan.ID)
-		if err != nil {
-			return nil, err
 		}
 		if !fresh.Enabled || fresh.NextRunAt == nil || fresh.NextRunAt.After(time.Now()) {
 			return nil, nil
@@ -174,7 +179,6 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 	var result *ScheduledTestResult
-	var err error
 	if plan.TestKind == ScheduledTestCandyV1 {
 		select {
 		case s.reasoningSlots <- struct{}{}:
