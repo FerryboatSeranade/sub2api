@@ -446,6 +446,9 @@
           </template>
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
+              <HelpTooltip v-if="row.platform === 'openai' && row.type === 'oauth' && !row.parent_account_id" :content="t('admin.accounts.vmBridge.description')"><template #trigger>
+                <button class="btn btn-secondary px-2 py-1 text-xs" @click="vmBridgeAccount = row">vm2api</button>
+              </template></HelpTooltip>
               <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
@@ -470,6 +473,7 @@
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
+    <VM2APISyncDialog :account="vmBridgeAccount" @close="vmBridgeAccount = null" @updated="reload" />
     <ReasoningProbeOverview :show="showReasoningOverview" @close="showReasoningOverview = false; loadReasoningResults()" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
@@ -529,6 +533,8 @@ import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vu
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
+import VM2APISyncDialog from '@/components/admin/account/VM2APISyncDialog.vue'
+const vmBridgeAccount = ref<AccountListItem | null>(null)
 import ReasoningProbeOverview from '@/components/admin/account/ReasoningProbeOverview.vue'
 import AccountReasoningCell from '@/components/admin/account/AccountReasoningCell.vue'
 import type { ReasoningOverviewItem } from '@/api/admin/scheduledTests'

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
@@ -52,12 +53,15 @@ func ProvideAdminHandlers(
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	claudeResetCredits *service.ClaudeResetCreditService,
 	settingService *service.SettingService,
+	db *sql.DB,
+	adminService service.AdminService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
 	accountHandler.SetCodexTicketSettings(settingService)
+	accountHandler.SetVM2APIBridge(service.NewVM2APIBridge(db, adminService))
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,

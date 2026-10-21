@@ -163,6 +163,16 @@ def switch(slot):
     owner('none' if s['slots'][old].get('legacy') else slot)
     print('Traffic switched to',slot,'; old slot',old,'kept running. Run drain to finish.')
 
+def vmbridge_running():
+    # A provisioning job can outlive its initiating HTTP request. Do not kill it
+    # merely because nginx has no upstream connections left on the old slot.
+    key = 7318999999999998
+    query = f"SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND classid={key >> 32}::oid AND objid={key & 0xffffffff}::oid AND granted)"
+    result = subprocess.check_output(['docker', 'exec', 'sub2api-staging-postgres', 'sh', '-c',
+        'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"', 'sh', query], text=True, timeout=15).strip()
+    if result not in ('t', 'f'): raise RuntimeError('Cannot verify vm2api task drain; old slot retained')
+    return result == 't'
+
 def drain():
     s=load();old=s.get('draining')
     if not old: print('Nothing draining');return
@@ -175,6 +185,8 @@ def drain():
         print('Connections drained. Waiting 195 seconds for any in-flight scheduled probes; rerun drain.');return
     if time.time()<s['drain_not_before']:
         print('Waiting for scheduled-probe drain:',round(s['drain_not_before']-time.time()),'seconds');return
+    if vmbridge_running():
+        print('vm2api synchronization is still running; retain old slot and retry later.');return
     run('docker','stop','--time','60',s['slots'][old]['container'])
     owner(s['active'])
     s.pop('draining',None);s.pop('drain_not_before',None);save(s)

@@ -1,5 +1,6 @@
 export default {
     accounts: {
+ vmBridge: {"title": "Transfer / sync to vm2api", "description": "Create or update a dedicated slot and key. Only after a real API test succeeds, create the vm2api account and disable direct scheduling on the original. Failed tests do not switch accounts.", "limits": "Sub2API account: 2 → dedicated key: 2 → dedicated slot: 2 concurrent requests", "groups": "Also inherit source groups", "groupsHint": "Always joins vm2api-hz. Optionally adds the source OpenAI groups; existing target groups are preserved.", "background": "Runs in the background. Closing does not cancel. Retrying reconciles existing resources. Shared keys lose this slot and are disabled if empty.", "start": "Confirm and sync", "running": "Sync in progress", "completed": "Sync completed", "failed": "Sync failed — retry available", "interrupted": "Interrupted — retry available", "container": "Slot", "target": "New account", "unconfigured": "vm2api integration is not configured on the server", "loadFailed": "Cannot read progress. Refresh before continuing.", "startFailed": "Submission not confirmed. Refresh progress before retrying."},
       reasoning: {
     globalSwitch: 'Auto-exclude degraded accounts',
     globalHint: 'Applies to inherited policies. Per-account overrides take precedence. Only explicit degraded results exclude accounts.',
