@@ -54,6 +54,14 @@ func (s *GatewayService) CompleteCompositeBPSModelCatalog(ctx context.Context, g
 	if s.compositeResolver != nil && s.compositeResolver.repo != nil {
 		all, err := s.compositeResolver.repo.ListByGroup(ctx, *groupID, true)
 		if err != nil {
+			// Preserve the existing non-BPS catalog fallback during route-store outages.
+			// BPS accounts require verified explicit routes and must fail closed.
+			if !configured {
+				if len(existing) == 0 {
+					return nil, nil
+				}
+				return existing, nil
+			}
 			return nil, fmt.Errorf("load composite catalog routes: %w", err)
 		}
 		for _, route := range all {
