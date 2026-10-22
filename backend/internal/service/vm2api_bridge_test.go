@@ -256,3 +256,16 @@ func TestVMBridgeQueuedPlanCannotRunOnOldAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestVMBridgeProxyConflictMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(409)
+		w.Write([]byte(`{"error":{"code":"proxy_unavailable","message":"secret-upstream-data"}}`))
+	}))
+	defer server.Close()
+	s := &VM2APIBridge{base: server.URL, client: server.Client()}
+	err := s.call(context.Background(), "POST", "/api/panel/vms/create", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "绑定已满") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("unsafe or unclear error: %v", err)
+	}
+}

@@ -122,7 +122,25 @@ func (s *VM2APIBridge) call(ctx context.Context, method, path string, body any, 
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("vm2api 返回 HTTP %d", res.StatusCode)
+		var detail struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		_ = json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&detail)
+		switch detail.Error.Code {
+		case "proxy_unavailable":
+			return errors.New("vm2api 出口不可用或绑定已满，请检查代理出口状态及绑定上限后重试；原账号未切换")
+		case "proxy_not_found":
+			return errors.New("vm2api 配置的代理出口不存在或无权绑定，请检查集成出口配置")
+		case "local_proxy_node_mismatch":
+			return errors.New("vm2api 本地出口与目标节点不匹配，请检查出口配置")
+		}
+		if res.StatusCode == 409 && detail.Error.Message == "vm id exists" {
+			return errors.New("vm2api 容器标识已存在，请刷新容器列表后重试")
+		}
+		return fmt.Errorf("vm2api 管理接口 %s %s 返回 HTTP %d", method, path, res.StatusCode)
 	}
 	b, e := io.ReadAll(io.LimitReader(res.Body, 8<<20))
 	if e != nil {
