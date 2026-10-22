@@ -49,7 +49,8 @@
         </template>
 
         <template #cell-account="{ row }">
-          <span class="text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
+          <div class="max-w-xs break-all text-sm text-gray-900 dark:text-white">{{ row.account?.name || (row.account_id ? t('admin.usage.accountUnavailable') : '—') }}</div>
+          <span v-if="row.account_id" class="text-xs text-gray-500">#{{ row.account_id }}</span>
         </template>
 
         <template #cell-model="{ row }">

@@ -27,6 +27,7 @@ type ScheduledTestResult struct {
 	PlanID       int64                     `json:"plan_id"`
 	TestKind     string                    `json:"test_kind"`
 	ModelID      string                    `json:"model_id"`
+	Pelican      *PelicanEvaluation        `json:"pelican,omitempty"`
 	Quality      *ReasoningProbeEvaluation `json:"quality,omitempty"`
 	Status       string                    `json:"status"`
 	ResponseText string                    `json:"response_text"`

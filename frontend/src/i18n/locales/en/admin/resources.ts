@@ -1,5 +1,17 @@
 export default {
     scheduledTests: {
+      pelicanProbe: 'Pelican bicycle SVG (auxiliary)',
+      pelicanHelp: 'Checks SVG syntax, canvas, shape count and candidate wheels; retains the drawing for review. Structure scores do not measure visual quality or intelligence and never affect auto-exclusion. OpenAI accounts only.',
+      pelicanScore: 'Structure score',
+      pelican_reference_only: 'Generated · visual review needed',
+      pelican_invalid_svg: 'Invalid SVG or unsafe for preview',
+      pelican_inconclusive: 'Failed / inconclusive',
+      pelican_safe_svg: 'Safe SVG',
+      pelican_viewbox: 'Valid canvas',
+      pelican_vector_shapes: 'At least 8 vector shapes',
+      pelican_wheel_pair: 'Candidate wheel pair',
+      pelicanPreview: 'Expand / collapse SVG preview',
+
       overview: "Reasoning probe overview",
       runAll: "Run all (2 concurrent)",
       exportResults: "Export results",
@@ -575,6 +587,8 @@ export default {
 	  upstreamModelMismatchOnly: 'Mismatched only',
 	  upstreamModelMatchedOnly: 'Matched only',
       ipAddress: 'IP',
+      actualAccount: 'Actual account',
+      accountUnavailable: 'Account deleted or unavailable',
       clickToViewBalance: 'Click to view balance history',
       failedToLoadUser: 'Failed to load user info',
       userDeletedBadge: 'Deleted',

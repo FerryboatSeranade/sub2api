@@ -179,14 +179,18 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 	var result *ScheduledTestResult
-	if plan.TestKind == ScheduledTestCandyV1 {
+	if plan.TestKind == ScheduledTestCandyV1 || plan.TestKind == ScheduledTestPelicanV1 {
 		select {
 		case s.reasoningSlots <- struct{}{}:
 			defer func() { <-s.reasoningSlots }()
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		result, err = s.accountTestSvc.RunReasoningProbe(ctx, plan.AccountID)
+		if plan.TestKind == ScheduledTestPelicanV1 {
+			result, err = s.accountTestSvc.RunPelicanProbe(ctx, plan.AccountID, plan.ModelID)
+		} else {
+			result, err = s.accountTestSvc.RunReasoningProbe(ctx, plan.AccountID)
+		}
 	} else {
 		result, err = s.accountTestSvc.RunTestBackground(ctx, plan.AccountID, plan.ModelID)
 	}
@@ -203,7 +207,7 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 	}
 
 	// Auto-recover account if test succeeded and auto_recover is enabled.
-	if result.Status == "success" && plan.AutoRecover && plan.TestKind != ScheduledTestCandyV1 {
+	if result.Status == "success" && plan.AutoRecover && plan.TestKind == ScheduledTestConnectivity {
 		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID)
 	}
 

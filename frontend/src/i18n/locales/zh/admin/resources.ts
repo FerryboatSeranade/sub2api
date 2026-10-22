@@ -1,5 +1,17 @@
 export default {
     scheduledTests: {
+      pelicanProbe: '鹈鹕骑自行车 SVG（辅助）',
+      pelicanHelp: '自动检查 SVG 格式、画布、图形数量和候选车轮，保存原图供复核。结构分不代表绘画质量或模型智力，不参与降智自动排除。仅支持 OpenAI 账号。',
+      pelicanScore: '结构检查分',
+      pelican_reference_only: '已生成 · 待视觉复核',
+      pelican_invalid_svg: 'SVG 无效或不符合安全预览要求',
+      pelican_inconclusive: '检测失败 / 无法判定',
+      pelican_safe_svg: '可安全预览的 SVG',
+      pelican_viewbox: '有效画布',
+      pelican_vector_shapes: '至少 8 个矢量图形',
+      pelican_wheel_pair: '检测到候选车轮对',
+      pelicanPreview: '展开 / 收起 SVG 图片',
+
       overview: "降智检测总览",
       runAll: "检测全部（并发 2）",
       exportResults: "导出结果",
@@ -572,6 +584,8 @@ export default {
 	  upstreamModelMismatchOnly: '仅不一致',
 	  upstreamModelMatchedOnly: '仅一致',
       ipAddress: 'IP',
+      actualAccount: '实际使用账号',
+      accountUnavailable: '账号已删除或不可用',
       clickToViewBalance: '点击查看充值记录',
       failedToLoadUser: '加载用户信息失败',
       userDeletedBadge: '已删除',

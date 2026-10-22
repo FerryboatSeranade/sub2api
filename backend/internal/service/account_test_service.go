@@ -906,7 +906,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt)
-	if prompt == CandyReasoningPrompt {
+	if prompt == CandyReasoningPrompt || prompt == PelicanPrompt {
 		configureReasoningPayload(payload, false)
 	}
 	payloadBytes, _ := json.Marshal(payload)
@@ -2151,7 +2151,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	c.Writer.Flush()
 
 	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
-	if prompt == CandyReasoningPrompt {
+	if prompt == CandyReasoningPrompt || prompt == PelicanPrompt {
 		configureReasoningPayload(payload, true)
 	}
 	payloadBytes, _ := json.Marshal(payload)

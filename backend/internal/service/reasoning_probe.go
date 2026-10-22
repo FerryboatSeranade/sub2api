@@ -34,6 +34,7 @@ var reasoningNumbers = regexp.MustCompile(`[+-]?[0-9]+(?:\.[0-9]+)?`)
 // conclusion. It is not a general intelligence measurement. Failed calls and
 // empty responses must never be classified as degraded.
 func EvaluateReasoningProbe(result *ScheduledTestResult) {
+	EvaluatePelicanProbe(result)
 	if result == nil || result.TestKind != ScheduledTestCandyV1 {
 		return
 	}
@@ -70,6 +71,11 @@ func validateScheduledTestKind(plan *ScheduledTestPlan) error {
 	}
 	switch plan.TestKind {
 	case ScheduledTestConnectivity:
+	case ScheduledTestPelicanV1:
+		if plan.ModelID == "" {
+			plan.ModelID = CandyReasoningModel
+		}
+		plan.AutoRecover = false
 	case ScheduledTestCandyV1:
 		if plan.ModelID == "" {
 			plan.ModelID = CandyReasoningModel

@@ -2481,7 +2481,7 @@ export interface TotpLogin2FARequest {
 // ==================== Scheduled Test Types ====================
 
 export interface ScheduledTestPlan {
-  test_kind?: 'connectivity' | 'candy_v1'
+  test_kind?: 'connectivity' | 'candy_v1' | 'pelican_svg_v1'
   id: number
   account_id: number
   model_id: string
@@ -2496,7 +2496,8 @@ export interface ScheduledTestPlan {
 }
 
 export interface ScheduledTestResult {
-  test_kind?: 'connectivity' | 'candy_v1'
+  pelican?: { version: string; verdict: string; score: number; checks: { name: string; passed: boolean }[]; svg?: string }
+  test_kind?: 'connectivity' | 'candy_v1' | 'pelican_svg_v1'
   model_id?: string
   quality?: {
     verdict: 'not_degraded' | 'degraded' | 'inconclusive'
@@ -2515,7 +2516,7 @@ export interface ScheduledTestResult {
 }
 
 export interface CreateScheduledTestPlanRequest {
-  test_kind?: 'connectivity' | 'candy_v1'
+  test_kind?: 'connectivity' | 'candy_v1' | 'pelican_svg_v1'
   account_id: number
   model_id: string
   cron_expression: string
@@ -2525,7 +2526,7 @@ export interface CreateScheduledTestPlanRequest {
 }
 
 export interface UpdateScheduledTestPlanRequest {
-  test_kind?: 'connectivity' | 'candy_v1'
+  test_kind?: 'connectivity' | 'candy_v1' | 'pelican_svg_v1'
   model_id?: string
   cron_expression?: string
   enabled?: boolean

@@ -33,6 +33,7 @@
             <label class="mb-1 block text-xs font-medium">{{ t('admin.scheduledTests.kind') }}</label>
             <Select v-model="newPlan.test_kind" :options="testKindOptions" />
             <p v-if="newPlan.test_kind === 'candy_v1'" class="mt-2 text-xs text-gray-500">{{ t('admin.scheduledTests.qualityHelp') }}</p>
+            <p v-if="newPlan.test_kind === 'pelican_svg_v1'" class="mt-2 text-xs text-gray-500">{{ t('admin.scheduledTests.pelicanHelp') }}</p>
           </div>
           <div>
             <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -105,7 +106,7 @@
           <div class="flex items-end">
             <div>
               <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <Toggle v-model="newPlan.auto_recover" :disabled="newPlan.test_kind === 'candy_v1'" />
+                <Toggle v-model="newPlan.auto_recover" :disabled="newPlan.test_kind !== 'connectivity'" />
                 {{ t('admin.scheduledTests.autoRecover') }}
               </label>
               <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
@@ -206,6 +207,7 @@
               </div>
 
               <span v-if="plan.test_kind === 'candy_v1'" class="text-xs text-primary-600">{{ t('admin.scheduledTests.candyProbe') }}</span>
+              <span v-if="plan.test_kind === 'pelican_svg_v1'" class="text-xs text-primary-600">{{ t('admin.scheduledTests.pelicanProbe') }}</span>
               <!-- Actions -->
               <div class="flex items-center gap-1" @click.stop>
                 <button @click="handleRun(plan)" :disabled="runningPlanIds.has(plan.id)" :title="t('admin.scheduledTests.runNow')" class="rounded-lg px-2 py-1 text-xs text-primary-600 hover:bg-primary-50 disabled:opacity-50">
@@ -253,6 +255,7 @@
             <label class="mb-1 block text-xs font-medium">{{ t('admin.scheduledTests.kind') }}</label>
             <Select v-model="editForm.test_kind" :options="testKindOptions" />
             <p v-if="editForm.test_kind === 'candy_v1'" class="mt-2 text-xs text-gray-500">{{ t('admin.scheduledTests.qualityHelp') }}</p>
+            <p v-if="editForm.test_kind === 'pelican_svg_v1'" class="mt-2 text-xs text-gray-500">{{ t('admin.scheduledTests.pelicanHelp') }}</p>
           </div>
               <div>
                 <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
@@ -325,7 +328,7 @@
               <div class="flex items-end">
                 <div>
                   <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <Toggle v-model="editForm.auto_recover" :disabled="editForm.test_kind === 'candy_v1'" />
+                    <Toggle v-model="editForm.auto_recover" :disabled="editForm.test_kind !== 'connectivity'" />
                     {{ t('admin.scheduledTests.autoRecover') }}
                   </label>
                   <p class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
@@ -422,6 +425,16 @@
                   <p class="mt-1 break-words">{{ t('admin.scheduledTests.numbers') }}: {{ result.quality.numbers.join(', ') || '—' }}</p>
                   <p>{{ t('admin.scheduledTests.contains21') }}: {{ result.quality.contains_21 === null ? '—' : result.quality.contains_21 ? t('common.yes') : t('common.no') }}</p>
                 </div>
+                <div v-if="result.pelican" class="mt-3 space-y-2 text-xs">
+                  <strong>{{ t(`admin.scheduledTests.pelican_${result.pelican.verdict}`) }}</strong>
+                  <p>{{ t('admin.scheduledTests.pelicanScore') }}: {{ result.pelican.score }}/100</p>
+                  <p class="text-gray-500">{{ t('admin.scheduledTests.pelicanHelp') }}</p>
+                  <ul class="flex flex-wrap gap-3"><li v-for="check in result.pelican.checks" :key="check.name">{{ check.passed ? '✓' : '—' }} {{ t(`admin.scheduledTests.pelican_${check.name}`) }}</li></ul>
+                  <details v-if="result.pelican.svg" class="rounded border p-2">
+                    <summary class="cursor-pointer" :title="t('admin.scheduledTests.pelicanPreview')">{{ t('admin.scheduledTests.pelicanPreview') }}</summary>
+                    <img :src="'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(result.pelican.svg)" :alt="t('admin.scheduledTests.pelicanProbe')" class="mt-2 max-h-96 w-full bg-white" loading="lazy" />
+                  </details>
+                </div>
                 <!-- Response / Error (collapsible) -->
                 <div v-if="result.error_message" class="mt-2">
                   <div
@@ -514,7 +527,8 @@ const emit = defineEmits<{
 
 const testKindOptions = computed(() => [
   { value: 'connectivity', label: t('admin.scheduledTests.connectivity') },
-  { value: 'candy_v1', label: t('admin.scheduledTests.candyProbe') }
+  { value: 'candy_v1', label: t('admin.scheduledTests.candyProbe') },
+  { value: 'pelican_svg_v1', label: t('admin.scheduledTests.pelicanProbe') }
 ])
 const runningPlanIds = reactive(new Set<number>())
 const handleRun = async (plan: ScheduledTestPlan) => {
@@ -552,7 +566,7 @@ const deletingPlan = ref<ScheduledTestPlan | null>(null)
 const editingPlanId = ref<number | null>(null)
 const updating = ref(false)
 const editForm = reactive({
-  test_kind: 'connectivity' as 'connectivity' | 'candy_v1',
+  test_kind: 'connectivity' as 'connectivity' | 'candy_v1' | 'pelican_svg_v1',
   model_id: '' as string,
   cron_expression: '' as string,
   max_results: '100' as string,
@@ -561,7 +575,7 @@ const editForm = reactive({
 })
 
 const newPlan = reactive({
-  test_kind: 'connectivity' as 'connectivity' | 'candy_v1',
+  test_kind: 'connectivity' as 'connectivity' | 'candy_v1' | 'pelican_svg_v1',
   model_id: '' as string,
   cron_expression: '' as string,
   max_results: '100' as string,
@@ -580,7 +594,7 @@ const resetNewPlan = () => {
 
 for (const form of [newPlan, editForm]) {
   watch(() => form.test_kind, (kind) => {
-    if (kind === 'candy_v1') {
+    if (kind === 'candy_v1' || kind === 'pelican_svg_v1') {
       form.model_id = 'gpt-6.1-sol'
       form.auto_recover = false
       if (!form.cron_expression) form.cron_expression = '0 3 * * *'

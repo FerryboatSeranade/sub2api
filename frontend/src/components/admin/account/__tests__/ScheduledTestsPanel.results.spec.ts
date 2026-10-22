@@ -83,4 +83,16 @@ describe('scheduled test result selection', () => {
     await flushPromises()
     expect(wrapper.html()).toBe(current)
   })
+  it('renders auxiliary SVG as an isolated image without a candy verdict', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="10"/></svg>'
+    listResults.mockResolvedValue([{ ...result(1), test_kind: 'pelican_svg_v1', pelican: { verdict: 'reference_only', score: 50, checks: [{ name: 'safe_svg', passed: true }], svg } }])
+    const wrapper = await openPanel()
+    await wrapper.findAll('.cursor-pointer')[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.scheduledTests.pelican_reference_only')
+    expect(wrapper.text()).not.toContain('admin.scheduledTests.contains21')
+    expect(wrapper.find('img').attributes('src')).toBe('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg))
+    expect(wrapper.find('svg').exists()).toBe(false)
+  })
+
 })

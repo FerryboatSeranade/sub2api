@@ -47,3 +47,25 @@ func TestCandyReasoningUsesExactModelAndPreservesHealth(t *testing.T) {
 		})
 	}
 }
+
+func TestPelicanUsesRequestedModelWithoutHealthMutation(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "fake-test-token"}}
+	repo := &openAIAccountTestRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{accountsByID: map[int64]*Account{1: account}}}
+	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"<svg viewBox='0 0 100 100'><circle cx='20' cy='20' r='10'/></svg>\"}\n\ndata: {\"type\":\"response.completed\"}\n\n"
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{newJSONResponse(200, body)}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	result, err := svc.RunPelicanProbe(context.Background(), 1, CandyReasoningModel)
+	require.NoError(t, err)
+	require.Equal(t, ScheduledTestPelicanV1, result.TestKind)
+	require.Nil(t, result.Quality)
+	require.Equal(t, "reference_only", result.Pelican.Verdict)
+	raw, err := io.ReadAll(upstream.requests[0].Body)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(raw, &payload))
+	require.Equal(t, CandyReasoningModel, payload["model"])
+	require.Equal(t, "none", payload["tool_choice"])
+	require.Contains(t, string(raw), "pelican riding a bicycle")
+	require.Zero(t, repo.setErrorID)
+	require.Zero(t, repo.rateLimitedID)
+}
