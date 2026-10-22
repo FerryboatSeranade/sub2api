@@ -12,7 +12,8 @@ const mount = (verdict: string | null, enabled = false) => shallowMount(AccountR
 describe('account reasoning policy', () => {
  it('distinguishes untested and failed from degraded', () => {
   expect(mount(null).text()).toContain('reasoning.untested')
-  expect(mount('inconclusive', true).text()).not.toContain('reasoning.excluded')
+  expect(mount('inconclusive', true).text()).toContain('reasoning.excludedInconclusive')
+  expect(mount('inconclusive', false).text()).not.toContain('reasoning.excludedInconclusive')
   expect(mount('degraded', true).text()).toContain('reasoning.excluded')
  })
  it('emits opt-in without changing the manual scheduling flag', async () => {
@@ -20,7 +21,7 @@ describe('account reasoning policy', () => {
   expect(w.emitted('policy')).toEqual([['enabled']])
  })
  it('inherits global and allows an explicit opt-out', async () => {
-  const w=mount('degraded'); await w.setProps({globalEnabled:true})
+  const w=mount('inconclusive'); await w.setProps({globalEnabled:true})
   expect(w.text()).toContain('reasoning.excluded')
   await w.setProps({account:{id:1,platform:'openai',extra:{reasoning_exclusion_policy:'disabled'}} as AccountListItem})
   expect(w.text()).not.toContain('reasoning.excluded')

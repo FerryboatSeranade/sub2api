@@ -29,6 +29,7 @@ const checkedAt = computed(() => props.result ? new Date(props.result.finished_a
     </select>
    </template>
   </HelpTooltip>
+  <span v-if="enabled && verdict === 'inconclusive'" class="text-amber-600">{{ t('admin.accounts.reasoning.excludedInconclusive') }}</span>
   <span v-if="enabled && verdict === 'degraded'" class="text-red-600">{{ t('admin.accounts.reasoning.excluded') }}</span>
  </div>
  <span v-else class="text-xs text-gray-400">{{ t('admin.accounts.reasoning.notApplicable') }}</span>

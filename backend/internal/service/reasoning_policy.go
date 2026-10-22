@@ -19,11 +19,12 @@ func reasoningSnapshot(result *ScheduledTestResult) map[string]any {
 }
 
 // This policy never changes the administrator's schedulable flag or health status.
-// Inconclusive/untested accounts stay eligible. A newer successful probe recovers automatically.
+// Failed/inconclusive probes are temporarily excluded too; untested accounts stay eligible.
+// A newer passing probe releases this policy without overriding other health gates.
 func (a *Account) IsReasoningExcluded() bool {
 	enabled, _ := a.Extra[ReasoningAutoExcludeKey].(bool)
 	latest, _ := a.Extra[ReasoningLatestKey].(map[string]any)
-	return enabled && latest["verdict"] == "degraded"
+	return enabled && (latest["verdict"] == "degraded" || latest["verdict"] == "inconclusive")
 }
 
 const ReasoningPolicyKey = "reasoning_exclusion_policy"

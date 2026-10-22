@@ -20,10 +20,17 @@ func TestReasoningPolicyPreservesManualHealth(t *testing.T) {
 	a.Extra[ReasoningAutoExcludeKey] = true
 	require.False(t, a.IsSchedulable())
 	require.True(t, a.Schedulable, "manual state unchanged")
-	for _, verdict := range []string{"not_degraded", "inconclusive", "untested"} {
+	for _, verdict := range []string{"not_degraded", "untested"} {
 		a.Extra[ReasoningLatestKey] = map[string]any{"verdict": verdict}
 		require.True(t, a.IsSchedulable())
 	}
+	a.Extra[ReasoningLatestKey] = map[string]any{"verdict": "inconclusive"}
+	require.False(t, a.IsSchedulable(), "failed probes are temporarily excluded")
+	a.Extra[ReasoningAutoExcludeKey] = false
+	require.True(t, a.IsSchedulable(), "disabled policy does not exclude failures")
+	a.Extra[ReasoningAutoExcludeKey] = true
+	a.Extra[ReasoningLatestKey] = map[string]any{"verdict": "not_degraded"}
+	require.True(t, a.IsSchedulable(), "passing probe releases temporary exclusion")
 	a.Schedulable = false
 	require.False(t, a.IsSchedulable(), "passing probe cannot override manual pause")
 	a.Schedulable = true
