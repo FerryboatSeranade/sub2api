@@ -127,6 +127,26 @@ export function isDuplicateRechargeBonusMinAmount(tiers: RechargeBonusTierDraft[
   return tiers.some((tier, i) => i !== index && isRechargeBonusMinAmountValid(tier.min_amount) && minAmountKey(tier.min_amount) === key)
 }
 
+export type RechargeBonusTierDraftError = '' | 'invalidMinAmount' | 'invalidPercent' | 'invalidDiscountPercent' | 'duplicateMinAmount'
+
+// The editor and settings submission must agree: never silently save a row that shows an error.
+export function getRechargeBonusTierDraftError(
+  tiers: RechargeBonusTierDraft[],
+  index: number,
+  mode: RechargeBonusMode,
+): RechargeBonusTierDraftError {
+  const tier = tiers[index]
+  if (!tier) return ''
+  if (tier.min_amount !== null && !isRechargeBonusMinAmountValid(tier.min_amount)) return 'invalidMinAmount'
+  if (tier.bonus_percent !== null && !isRechargeBonusPercentValidForMode(tier.bonus_percent, mode)) {
+    return mode === 'discount' && isRechargeBonusPercentValidForMode(tier.bonus_percent, 'bonus')
+      ? 'invalidDiscountPercent'
+      : 'invalidPercent'
+  }
+  if (isDuplicateRechargeBonusMinAmount(tiers, index)) return 'duplicateMinAmount'
+  return ''
+}
+
 // 命中规则：取不超过支付金额的最大阈值档位；与后端 matchRechargeBonusTier 一致。
 export function matchRechargeBonusTier(tiers: RechargeBonusTier[], paymentAmount: number): RechargeBonusTier | null {
   if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) return null

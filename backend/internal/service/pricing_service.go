@@ -1583,15 +1583,12 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		}
 	}
 
-	if openai.IsGPT61SolModelSpelling(model) {
-		if pricing, ok := s.pricingData["gpt-6.1-sol"]; ok {
-			return pricing
-		}
-		return openAIGPT61SolFallbackPricing
-	}
-	if openai.IsGPT6SolOrLunaModelSpelling(model) {
+	if openai.IsGPT6SolFamilyModelSpelling(model) {
 		if pricing, ok := s.pricingData[normalizeKnownOpenAICodexModel(model)]; ok {
 			return pricing
+		}
+		if strings.HasPrefix(model, "gpt-6.1-sol") {
+			return openAIGPT61SolFallbackPricing
 		}
 		if strings.HasPrefix(model, "gpt-6-sol") {
 			return openAIGPT6SolFallbackPricing

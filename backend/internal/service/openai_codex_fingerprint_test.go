@@ -232,7 +232,7 @@ func TestApplyCodexFingerprintHeaders_SessionMode(t *testing.T) {
 	require.True(t, ok)
 	convergedInstall := resolveConvergedInstallationID(account, seed)
 	convergedSession := resolveConvergedSessionID(seed)
-	convergedThread := resolveConvergedThreadID(seed, "client-session-aaa")
+	convergedThread := "user-thread"
 
 	assert.Equal(t, convergedInstall, h.Get("x-codex-installation-id"))
 	assert.Equal(t, convergedSession, h.Get("session-id"))
@@ -246,7 +246,7 @@ func TestApplyCodexFingerprintHeaders_SessionMode(t *testing.T) {
 	assert.Equal(t, convergedInstall, meta["installation_id"])
 	assert.Equal(t, convergedSession, meta["session_id"])
 	assert.Equal(t, convergedThread, meta["thread_id"])
-	assert.NotEqual(t, "user-turn", meta["turn_id"], "turn_id 应被新生成的值替换")
+	assert.Equal(t, "user-turn", meta["turn_id"], "sampling continuation must retain the caller's turn")
 	assert.Equal(t, "seccomp", meta["sandbox"], "sandbox 保留原样")
 	assert.Equal(t, "user", meta["thread_source"], "thread_source 保留原样")
 }
@@ -254,61 +254,38 @@ func TestApplyCodexFingerprintHeaders_SessionMode(t *testing.T) {
 // --- session 模式：不同客户端得到不同 thread ---
 
 func TestApplyCodexFingerprintHeaders_SessionMode_DifferentClients(t *testing.T) {
-	account := newTestOAuthAccount(1, map[string]any{
-		codexFingerprintModeExtraKey: "session",
-	})
-
-	makeTurnMeta := func() string {
-		return `{"installation_id":"x","session_id":"x","thread_id":"x","turn_id":"x","window_id":"x:0"}`
-	}
-
-	clientA := http.Header{}
-	clientA.Set("session-id", "client-A")
-	idsA := resolveCodexFingerprintIDsFromRequest(account, clientA)
-	hA := http.Header{}
-	hA.Set("x-codex-turn-metadata", makeTurnMeta())
-	applyCodexFingerprintHeaders(hA, idsA)
-
-	clientB := http.Header{}
-	clientB.Set("session-id", "client-B")
-	idsB := resolveCodexFingerprintIDsFromRequest(account, clientB)
-	hB := http.Header{}
-	hB.Set("x-codex-turn-metadata", makeTurnMeta())
-	applyCodexFingerprintHeaders(hB, idsB)
-
-	assert.Equal(t, hA.Get("session-id"), hB.Get("session-id"), "session_id 应相同")
-	assert.NotEqual(t, hA.Get("thread-id"), hB.Get("thread-id"), "不同客户端 thread_id 应不同")
-	assert.NotEqual(t, hA.Get("x-codex-window-id"), hB.Get("x-codex-window-id"), "不同客户端 window_id 应不同")
-	assert.Equal(t, hA.Get("x-codex-installation-id"), hB.Get("x-codex-installation-id"))
+	testCodexFingerprintCallerIsolation(t, codexFingerprintSession)
 }
 
 // --- full 模式 ---
 
 func TestApplyCodexFingerprintHeaders_FullMode(t *testing.T) {
-	account := newTestOAuthAccount(1, map[string]any{
-		codexFingerprintModeExtraKey: "full",
-	})
-	seed, ok := codexFingerprintSeed(account.Extra)
-	require.True(t, ok)
-	convergedSession := resolveConvergedSessionID(seed)
+	testCodexFingerprintCallerIsolation(t, codexFingerprintFull)
+}
 
-	clientA := http.Header{}
-	clientA.Set("session-id", "client-A")
-	idsA := resolveCodexFingerprintIDsFromRequest(account, clientA)
-	hA := http.Header{}
-	hA.Set("x-codex-turn-metadata", `{"installation_id":"x","session_id":"x","thread_id":"x","turn_id":"x","window_id":"x:0"}`)
-	applyCodexFingerprintHeaders(hA, idsA)
-
-	clientB := http.Header{}
-	clientB.Set("session-id", "client-B")
-	idsB := resolveCodexFingerprintIDsFromRequest(account, clientB)
-	hB := http.Header{}
-	hB.Set("x-codex-turn-metadata", `{"installation_id":"x","session_id":"x","thread_id":"x","turn_id":"x","window_id":"x:0"}`)
-	applyCodexFingerprintHeaders(hB, idsB)
-
-	assert.Equal(t, hA.Get("thread-id"), hB.Get("thread-id"), "full 模式 thread_id 应相同")
-	assert.Equal(t, convergedSession, hA.Get("thread-id"), "full 模式 thread_id 应等于 session_id")
-	assert.Equal(t, hA.Get("x-codex-window-id"), hB.Get("x-codex-window-id"), "full 模式 window_id 应相同")
+func testCodexFingerprintCallerIsolation(t *testing.T, mode codexFingerprintMode) {
+	t.Helper()
+	account := newTestOAuthAccount(1, map[string]any{codexFingerprintModeExtraKey: string(mode)})
+	project := func(caller int64, thread string) http.Header {
+		h := http.Header{}
+		h.Set("session-id", "same-client-session")
+		h.Set("thread-id", thread)
+		h.Set("x-codex-window-id", thread+":3")
+		ids := resolveCodexFingerprintIDsForCaller(account, h, caller)
+		applyCodexAccountIdentityHeaders(h, account, caller)
+		applyCodexFingerprintHeaders(h, ids)
+		return h
+	}
+	first := project(1, "thread-a")
+	otherCaller := project(2, "thread-a")
+	otherThread := project(1, "thread-b")
+	for _, other := range []http.Header{otherCaller, otherThread} {
+		require.NotEqual(t, first.Get("thread-id"), other.Get("thread-id"))
+		require.NotEqual(t, first.Get("x-codex-window-id"), other.Get("x-codex-window-id"))
+	}
+	require.Equal(t, first.Get("thread-id")+":3", first.Get("x-codex-window-id"))
+	require.Equal(t, first.Get("thread-id"), first.Get("x-client-request-id"))
+	require.Equal(t, first, project(1, "thread-a"))
 }
 
 // --- H1 修复验证：头和体的 turn_id 一致性 ---
@@ -361,9 +338,9 @@ func TestFingerprintIDs_HeaderAndBody_TurnID_Consistent(t *testing.T) {
 
 	assert.Equal(t, headerTurnID, bodyTurnID, "头和体的 turn_id 必须一致")
 	assert.Equal(t, headerTurnID, bodyEmbeddedTurnID, "头和体内嵌 turn-metadata 的 turn_id 必须一致")
-	assert.Equal(t, ids.turnID, headerTurnID, "所有 turn_id 都应来自同一份 ids")
-	assert.Equal(t, headerMeta["turn_started_at_unix_ms"], bodyMeta["turn_started_at_unix_ms"], "头和体的 timestamp 必须一致")
-	assert.Equal(t, float64(ids.turnStartedAtUnixMs), headerMeta["turn_started_at_unix_ms"])
+	assert.Equal(t, "x", headerTurnID, "the client's turn survives multiple sampling requests")
+	assert.NotContains(t, headerMeta, "turn_started_at_unix_ms", "unknown turn timing must not be fabricated")
+	assert.NotContains(t, bodyMeta, "turn_started_at_unix_ms")
 }
 
 func TestFingerprintIDs_MalformedEmbeddedMetadataRebuiltConsistently(t *testing.T) {
@@ -375,7 +352,6 @@ func TestFingerprintIDs_MalformedEmbeddedMetadataRebuiltConsistently(t *testing.
 
 	h := make(http.Header)
 	h.Set("x-codex-turn-metadata", "{malformed")
-	applyCodexFingerprintHeaders(h, ids)
 
 	reqBody := map[string]any{
 		"client_metadata": map[string]any{
@@ -384,6 +360,7 @@ func TestFingerprintIDs_MalformedEmbeddedMetadataRebuiltConsistently(t *testing.
 		},
 	}
 	require.True(t, applyCodexFingerprintClientMetadata(reqBody, ids))
+	applyCodexFingerprintHeaders(h, ids)
 
 	var headerMeta map[string]any
 	require.NoError(t, json.Unmarshal([]byte(h.Get("x-codex-turn-metadata")), &headerMeta))
@@ -442,81 +419,6 @@ func TestApplyCodexFingerprintClientMetadata_DeviceMode(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(turnMetaStr), &meta))
 	assert.Equal(t, "converged-device", meta["installation_id"])
 	assert.Equal(t, "seccomp", meta["sandbox"], "非指纹字段保留原样")
-}
-
-func TestApplyCodexFingerprintClientMetadata_SessionMode(t *testing.T) {
-	account := newTestOAuthAccount(1, map[string]any{
-		codexFingerprintModeExtraKey: "session",
-	})
-	clientHeaders := http.Header{}
-	clientHeaders.Set("session-id", "client-session-aaa")
-
-	ids := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
-	require.NotNil(t, ids)
-
-	embeddedMeta := `{"installation_id":"x","session_id":"x","thread_id":"x","turn_id":"x","window_id":"x:0","sandbox":"seccomp"}`
-	reqBody := map[string]any{
-		"client_metadata": map[string]any{
-			"x-codex-installation-id": "original-install",
-			"session_id":              "original-session",
-			"x-codex-turn-metadata":   embeddedMeta,
-		},
-	}
-
-	modified := applyCodexFingerprintClientMetadata(reqBody, ids)
-	require.True(t, modified)
-
-	cm, ok := reqBody["client_metadata"].(map[string]any)
-	require.True(t, ok)
-	seed, ok := codexFingerprintSeed(account.Extra)
-	require.True(t, ok)
-	convergedInstall := resolveConvergedInstallationID(account, seed)
-	convergedSession := resolveConvergedSessionID(seed)
-	convergedThread := resolveConvergedThreadID(seed, "client-session-aaa")
-
-	assert.Equal(t, convergedInstall, cm["x-codex-installation-id"])
-	assert.Equal(t, convergedSession, cm["session_id"])
-	assert.Equal(t, convergedThread, cm["thread_id"])
-	assert.Equal(t, convergedThread+":0", cm["x-codex-window-id"])
-
-	turnMetaStr, ok := cm["x-codex-turn-metadata"].(string)
-	require.True(t, ok)
-	var meta map[string]any
-	require.NoError(t, json.Unmarshal([]byte(turnMetaStr), &meta))
-	assert.Equal(t, convergedInstall, meta["installation_id"])
-	assert.Equal(t, convergedSession, meta["session_id"])
-	assert.Equal(t, "seccomp", meta["sandbox"], "非指纹字段保留原样")
-}
-
-func TestApplyCodexFingerprintClientMetadata_FullMode(t *testing.T) {
-	account := newTestOAuthAccount(1, map[string]any{
-		codexFingerprintModeExtraKey: "full",
-	})
-	clientHeaders := http.Header{}
-	clientHeaders.Set("session-id", "any-client")
-
-	ids := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
-	require.NotNil(t, ids)
-
-	reqBody := map[string]any{
-		"client_metadata": map[string]any{
-			"session_id":            "x",
-			"thread_id":             "x",
-			"x-codex-turn-metadata": `{"installation_id":"x","session_id":"x","thread_id":"x","turn_id":"x","window_id":"x:0"}`,
-		},
-	}
-
-	modified := applyCodexFingerprintClientMetadata(reqBody, ids)
-	require.True(t, modified)
-
-	cm, ok := reqBody["client_metadata"].(map[string]any)
-	require.True(t, ok)
-	seed, ok := codexFingerprintSeed(account.Extra)
-	require.True(t, ok)
-	convergedSession := resolveConvergedSessionID(seed)
-
-	assert.Equal(t, convergedSession, cm["session_id"])
-	assert.Equal(t, convergedSession, cm["thread_id"], "full 模式 thread_id 应等于 session_id")
 }
 
 // --- extractClientSessionID ---
@@ -782,7 +684,7 @@ func TestApplyCodexFingerprintClientMetadataRaw_PreservesUnrelatedFields(t *test
 	cm, _ := decoded["client_metadata"].(map[string]any)
 	require.NotNil(t, cm)
 	assert.Equal(t, ids.sessionID, cm["session_id"])
-	assert.Equal(t, ids.turnID, cm["turn_id"])
+	assert.NotContains(t, cm, "turn_id", "a missing caller turn must not be invented per HTTP request")
 }
 
 func TestApplyCodexFingerprintClientMetadataRaw_Noop(t *testing.T) {
@@ -882,13 +784,18 @@ func TestBuildUpstreamRequestOpenAIPassthrough_AppliesStagedFingerprint(t *testi
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
 	require.NoError(t, err)
 
-	assert.Equal(t, ids.sessionID, req.Header.Get("session_id"), "session 模式下出站 session_id 应为账号级收敛值")
-	assert.Equal(t, ids.installationID, req.Header.Get("x-codex-installation-id"))
+	// 收口后的官方线序：收敛值只体现在 session-id / thread-id / window-id /
+	// x-client-request-id 与 x-codex-turn-metadata；官方从不发的 session_id 与
+	// x-codex-installation-id 头必须缺席（安装 ID 见 turn-metadata/body）。
+	assert.Equal(t, ids.sessionID, req.Header.Get("session-id"), "session 模式下出站 session-id 应为账号级收敛值")
 	assert.Equal(t, ids.windowID, req.Header.Get("x-codex-window-id"))
 	assert.Equal(t, ids.threadID, req.Header.Get("x-client-request-id"))
+	assert.Empty(t, req.Header.Get("session_id"), "official /responses never sends the underscored session header")
+	assert.Empty(t, req.Header.Get("x-codex-installation-id"), "installation id belongs to turn-metadata/body, not a header")
 	turnMetadata := req.Header.Get("x-codex-turn-metadata")
 	require.NotEmpty(t, turnMetadata)
 	assert.Contains(t, turnMetadata, ids.sessionID, "turn-metadata JSON 中的 session_id 应被收敛")
+	assert.Contains(t, turnMetadata, ids.installationID, "turn-metadata JSON 中的 installation_id 应被收敛")
 	assert.Contains(t, turnMetadata, `"sandbox":"seatbelt"`, "turn-metadata 未指定字段应原样保留")
 }
 
@@ -911,9 +818,13 @@ func TestBuildUpstreamRequestOpenAIPassthrough_OffModeKeepsIsolatedSession(t *te
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
 	require.NoError(t, err)
 
-	assert.NotEmpty(t, req.Header.Get("session_id"))
-	assert.NotEqual(t, resolveConvergedSessionID(testCodexFingerprintSeed), req.Header.Get("session_id"), "off 模式不得收敛 session_id")
-	assert.Empty(t, req.Header.Get("x-codex-window-id"))
+	// off 模式仍走隔离：会话值落在官方 session-id 头上，且不得等于账号级收敛值；
+	// 官方从不发的 session_id / x-codex-installation-id 头由线序收口削平。
+	assert.NotEmpty(t, req.Header.Get("session-id"))
+	assert.NotEqual(t, resolveConvergedSessionID(testCodexFingerprintSeed), req.Header.Get("session-id"), "off 模式不得收敛 session-id")
+	assert.Empty(t, req.Header.Get("session_id"))
+	assert.Empty(t, req.Header.Get("x-codex-installation-id"))
+	assert.NotEmpty(t, req.Header.Get("x-codex-window-id"), "Codex metadata defaults should include a context window")
 }
 
 func TestApplyCodexFingerprintClientMetadataRaw_NonObjectBodyUntouched(t *testing.T) {

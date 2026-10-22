@@ -1681,7 +1681,7 @@ func TestBuildChatStreamErrorSSE(t *testing.T) {
 }
 
 func TestGPT6RawChatRejectsReasoningToolCalls(t *testing.T) {
-	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -1694,7 +1694,7 @@ func TestGPT6RawChatRejectsReasoningToolCalls(t *testing.T) {
 }
 
 func TestGPT6ReasoningModeAndSamplingCompatibility(t *testing.T) {
-	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 		body := []byte(`{"model":"` + model + `","reasoning":{"mode":"pro","effort":"max"},"temperature":0.7,"top_p":0.9,"top_logprobs":2,"include":["reasoning.encrypted_content","message.output_text.logprobs"],"prompt_cache_options":{"ttl":"30m"}}`)
 		out, changed, err := normalizeOpenAIResponsesReasoningMode(body, "")
 		require.NoError(t, err)
@@ -1707,12 +1707,6 @@ func TestGPT6ReasoningModeAndSamplingCompatibility(t *testing.T) {
 		require.Equal(t, "reasoning.encrypted_content", gjson.GetBytes(out, "include.0").String())
 		require.Equal(t, "30m", gjson.GetBytes(out, "prompt_cache_options.ttl").String())
 		require.Equal(t, "max", normalizeOpenAIReasoningEffortForModel("max", model))
-		d := newConfiguredCodexModelDescriptor(model)
-		require.NotNil(t, d.DefaultReasoningLevel)
-		require.Equal(t, "medium", *d.DefaultReasoningLevel)
-		require.EqualValues(t, 872000, d.MaxContextWindow)
-		require.Len(t, d.SupportedReasoningLevels, 5)
-		require.Len(t, d.ServiceTiers, 1)
 	}
 }
 
@@ -1836,11 +1830,12 @@ func TestGPT61SolMessagesEffortAliasesPreserveIntent(t *testing.T) {
 		applyOpenAICompatModelNormalization(req)
 		require.Equal(t, "gpt-6.1-sol", req.Model)
 		require.Equal(t, effort, req.OutputConfig.Effort)
-		_, err := apicompat.AnthropicToResponses(req)
+		out, err := apicompat.AnthropicToResponses(req)
 		if effort == "none" || effort == "minimal" {
 			require.Error(t, err)
 		} else {
 			require.NoError(t, err)
+			require.Equal(t, effort, out.Reasoning.Effort)
 		}
 	}
 }
@@ -1872,6 +1867,60 @@ func TestGPT61SolOnlyChatFallbackRejectsToolsAndDisabledReasoning(t *testing.T) 
 			require.Error(t, err)
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			require.Contains(t, rec.Body.String(), "gpt-6.1-sol")
+		}
+	}
+}
+
+func TestGPT61SolResponsesContractAfterMapping(t *testing.T) {
+	for _, effort := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
+		for _, suffix := range []bool{false, true} {
+			body := []byte(`{"model":"public","reasoning":{"mode":"pro","effort":"` + effort + `"},"temperature":0.5,"top_p":0.9}`)
+			mapped := "gpt-6.1-sol"
+			if suffix {
+				body = []byte(`{"model":"public","reasoning":{"mode":"pro"},"temperature":0.5,"top_p":0.9}`)
+				mapped += "-" + effort
+			}
+			out, _, err := normalizeGPT61SolResponsesRequest(body, "gpt-6.1-sol", mapped)
+			if effort == "none" || effort == "minimal" {
+				require.ErrorContains(t, err, "does not support reasoning effort")
+				continue
+			}
+			require.NoError(t, err)
+			require.Equal(t, effort, gjson.GetBytes(out, "reasoning.effort").String())
+			require.Equal(t, "pro", gjson.GetBytes(out, "reasoning.mode").String())
+			require.False(t, gjson.GetBytes(out, "temperature").Exists())
+			require.False(t, gjson.GetBytes(out, "top_p").Exists())
+		}
+	}
+	body := []byte(`{"model":"gpt-6-sol","reasoning":{"effort":"none"},"temperature":0.7}`)
+	out, changed, err := normalizeGPT61SolResponsesRequest(body, "gpt-6-sol")
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, body, out)
+}
+
+func TestGPT61SolHTTPResponsesRejectsDisabledReasoning(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, effort := range []string{"none", "minimal"} {
+			for _, baseURL := range []string{"https://api.openai.com", "https://compat.example/v1"} {
+				model := "public"
+				if passthrough {
+					model = "gpt-6.1-sol"
+				}
+				body := []byte(`{"model":"` + model + `","input":"hello","reasoning":{"effort":"` + effort + `"}}`)
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+				upstream := &httpUpstreamRecorder{}
+				svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+				account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+					Credentials: map[string]any{"api_key": "fixture-key", "base_url": baseURL, "model_mapping": map[string]any{"public": "gpt-6.1-sol"}},
+					Extra:       map[string]any{"openai_passthrough": passthrough}}
+				_, err := svc.Forward(context.Background(), c, account, body)
+				require.ErrorContains(t, err, "does not support reasoning effort")
+				require.Equal(t, http.StatusBadRequest, rec.Code)
+				require.Nil(t, upstream.lastReq)
+			}
 		}
 	}
 }

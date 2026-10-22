@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -98,9 +99,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 2. Model mapping
 	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
-	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
+	if err := validateGPT61SolCompatRequest(body, upstreamModel, billingModel); err != nil {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
+	}
+	if openai.IsGPT61SolModelSpelling(upstreamModel) {
+		anthropicReq.Model = billingModel
+		applyOpenAICompatModelNormalization(&anthropicReq)
 	}
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	apiKeyID := getAPIKeyIDFromContext(c)
@@ -399,8 +404,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
-	if err := s.applyOpenAICodexTicket(ctx, account, upstreamModel, upstreamReq.Header); err != nil {
+	if ticket, err := s.applyOpenAICodexTicketWithGeneration(ctx, account, upstreamModel, upstreamReq.Header); err != nil {
 		return nil, err
+	} else if ticket != nil {
+		upstreamReq = upstreamReq.WithContext(context.WithValue(upstreamReq.Context(), codexTicketRequestContextKey{}, ticket))
 	}
 
 	// 7. Send request

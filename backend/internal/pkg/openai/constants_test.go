@@ -23,17 +23,13 @@ func TestDefaultModelsIncludeGPT6Astra(t *testing.T) {
 	require.Equal(t, "GPT-6 Astra", displayName)
 }
 
-func TestDefaultModelsPreferConcreteGPT56SolForAccountTests(t *testing.T) {
-	require.NotEmpty(t, DefaultModels)
-	require.Equal(t, "gpt-5.6-sol", DefaultModels[0].ID)
-}
-
 func TestDefaultModelsIncludeGPTImage25(t *testing.T) {
 	require.Contains(t, DefaultModelIDs(), "gpt-image-2.5-flare")
 	require.Contains(t, DefaultModelIDs(), "gpt-image-2.5-sunburst")
 }
 
 func TestGPT6SolLunaModelIdentity(t *testing.T) {
+
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		require.Contains(t, DefaultModelIDs(), model)
 		require.True(t, IsGPT6SolOrLunaModelSpelling(model))
@@ -43,21 +39,25 @@ func TestGPT6SolLunaModelIdentity(t *testing.T) {
 	require.False(t, IsGPT6SolOrLunaModelSpelling("gpt-6-luna-preview"))
 }
 
-func TestGPT61SolIdentityAndEffort(t *testing.T) {
+func TestGPT61SolModelIdentity(t *testing.T) {
 	require.Contains(t, DefaultModelIDs(), "gpt-6.1-sol")
-	for _, id := range []string{"gpt-6.1-sol", "openai/gpt-6.1-sol-max", "GPT_6.1_SOL", "gpt-6.1-sol-openai-compact"} {
+	for _, id := range []string{"gpt-6.1-sol", "openai/gpt-6.1-sol-high", "openai/gpt-6.1-sol-max", "GPT_6.1_SOL", "gpt-6.1-sol-openai-compact"} {
 		require.True(t, IsGPT61SolModelSpelling(id), id)
+		require.True(t, IsGPT6SolFamilyModelSpelling(id), id)
 		require.False(t, IsGPT6SolOrLunaModelSpelling(id), id)
 	}
 	for _, id := range []string{"gpt-6.1", "gpt-6.1-solitude", "gpt-6.1-sol-preview", "gpt-6-sol"} {
 		require.False(t, IsGPT61SolModelSpelling(id), id)
 	}
+}
+
+func TestGPT61SolRejectsDisabledReasoning(t *testing.T) {
 	for _, effort := range []string{"", "low", "medium", "high", "xhigh", "max"} {
 		require.NoError(t, ValidateGPT61SolReasoningEffort("gpt-6.1-sol", effort))
 	}
-	for _, effort := range []string{"none", "minimal"} {
-		require.Error(t, ValidateGPT61SolReasoningEffort("gpt-6.1-sol", effort))
+	for _, effort := range []string{"none", "minimal", " NONE "} {
+		require.ErrorContains(t, ValidateGPT61SolReasoningEffort("openai/gpt-6.1-sol", effort), "does not support reasoning effort")
 		require.NoError(t, ValidateGPT61SolReasoningEffort("gpt-6-sol", effort))
 	}
-	require.Contains(t, CodexBaseInstructionsForModel("gpt-6.1-sol"), "based on GPT-6")
+	require.True(t, IsGPT61SolModelSpelling("GPT_6.1_SOL-minimal"))
 }

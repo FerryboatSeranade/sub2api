@@ -301,7 +301,15 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 // caller's context (which may be detached for billing or reused for retries).
 func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {
 	ctx, cancel := context.WithCancel(req.Context())
-	resp, err := servertiming.Do(client, req.WithContext(ctx))
+	wireRequest := req.WithContext(ctx)
+	if err := compressCodexResponsesRequest(wireRequest); err != nil {
+		cancel()
+		if wireRequest.Body != nil {
+			_ = wireRequest.Body.Close()
+		}
+		return nil, err
+	}
+	resp, err := servertiming.Do(client, wireRequest)
 	if err != nil {
 		cancel()
 		return resp, err
@@ -309,6 +317,55 @@ func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, 
 	decompressResponseBody(resp)
 	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
 	return resp, nil
+}
+
+var codexResponsesZstdEncoder = sync.OnceValues(func() (*zstd.Encoder, error) {
+	return zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderLevel(zstd.SpeedDefault))
+})
+
+// Codex compresses regular ChatGPT Responses requests, not the public API,
+// legacy compact endpoint, or WS frames. Keep the semantic request and its
+// GetBody replay unchanged; only the per-attempt wire request is encoded.
+func compressCodexResponsesRequest(req *http.Request) error {
+	if req == nil || req.URL == nil || req.Method != http.MethodPost ||
+		!strings.EqualFold(req.URL.Scheme, "https") ||
+		!strings.EqualFold(req.URL.Hostname(), "chatgpt.com") ||
+		req.URL.Path != "/backend-api/codex/responses" ||
+		req.Body == nil || req.GetBody == nil {
+		return nil
+	}
+	mediaType, _, _ := strings.Cut(req.Header.Get("Content-Type"), ";")
+	if !strings.EqualFold(strings.TrimSpace(mediaType), "application/json") {
+		return nil
+	}
+	if encoding := strings.TrimSpace(req.Header.Get("Content-Encoding")); encoding != "" && !strings.EqualFold(encoding, "identity") {
+		return nil
+	}
+	encoder, err := codexResponsesZstdEncoder()
+	if err != nil {
+		return fmt.Errorf("initialize Codex request compression: %w", err)
+	}
+	replay, err := req.GetBody()
+	if err != nil {
+		return fmt.Errorf("read Codex request for compression: %w", err)
+	}
+	payload, err := io.ReadAll(replay)
+	_ = replay.Close()
+	if err != nil {
+		return fmt.Errorf("read Codex request for compression: %w", err)
+	}
+	encoded := encoder.EncodeAll(payload, nil)
+	_ = req.Body.Close()
+	req.Body = io.NopCloser(bytes.NewReader(encoded))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(encoded)), nil
+	}
+	req.ContentLength = int64(len(encoded))
+	req.TransferEncoding = nil
+	req.Header = req.Header.Clone()
+	req.Header.Del("Content-Length")
+	req.Header.Set("Content-Encoding", "zstd")
+	return nil
 }
 
 type cancelOnCloseBody struct {
@@ -1362,6 +1419,19 @@ func newUpstreamDialer() *net.Dialer {
 	}
 }
 
+// isOpenAIUpstreamProtocolMode reports whether a transport serves the OpenAI
+// ChatGPT/Codex upstream lane, whose wire shape is matched against the official
+// Codex client rather than a generic JSON API.
+func isOpenAIUpstreamProtocolMode(protocolMode string) bool {
+	switch protocolMode {
+	case upstreamProtocolModeOpenAIH1, upstreamProtocolModeOpenAIH2,
+		upstreamProtocolModeOpenAIH1Fallback, upstreamProtocolModeOpenAIH1NoReuse:
+		return true
+	default:
+		return false
+	}
+}
+
 // buildUpstreamTransport 构建上游请求的 Transport
 // 使用配置文件中的连接池参数，支持生产环境调优
 //
@@ -1413,6 +1483,13 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		// 显式禁用 HTTP/2，确保代理不兼容场景回退到 HTTP/1.1。
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+	}
+	if isOpenAIUpstreamProtocolMode(protocolMode) {
+		// Go 的 Transport 默认自动注入 `Accept-Encoding: gzip` 并透明解压。官方
+		// Codex 客户端不广告 gzip（reqwest 未开解压 feature），这个头是可被
+		// 上游观测的客户端特征。响应侧解压由本文件的 decompressResponseBody
+		// 按 Content-Encoding 手工处理，禁用后语义不变。
+		transport.DisableCompression = true
 	}
 	if err := proxyutil.ConfigureTransportProxy(transport, proxyURL); err != nil {
 		return nil, err

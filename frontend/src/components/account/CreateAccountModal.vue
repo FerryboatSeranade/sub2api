@@ -1,6 +1,6 @@
 <template>
   <BaseDialog
-    :show="show"
+    :show="show" :close-on-escape="!pendingBPSCreate"
     :title="t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
@@ -246,6 +246,10 @@
             <PlatformIcon platform="opencode_go" size="sm" />
             OpenCode
           </button>
+          <button type="button" @click="form.platform = 'openai_bps'"
+            :class="['flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium', form.platform === 'openai_bps' ? 'bg-white text-green-700 shadow-sm dark:bg-dark-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400']">
+            <PlatformIcon platform="openai_bps" size="sm" />OpenAI BPS
+          </button>
           <!-- 没有专属界面的多协议供应商：通用表单（模式 / 协议 / 端点来自 profile） -->
           <button
             v-for="spec in extraMultiProtocolPlatforms"
@@ -265,6 +269,12 @@
           </button>
         </div>
       </div>
+
+      <div v-if="form.platform === 'openai_bps'" role="alert" data-testid="bps-risk-warning" class="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 p-4 text-amber-950 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100">
+        <div class="mb-1 flex items-center gap-2 font-bold"><Icon name="exclamationTriangle" size="md" />{{ t('admin.accounts.bps.riskTitle') }}</div>
+        <p class="text-sm font-medium">{{ t('admin.accounts.bps.riskDescription') }}</p>
+      </div>
+      <OpenAIBPSAccountFields v-if="form.platform === 'openai_bps'" v-model="bpsDraft" />
 
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
@@ -3315,6 +3325,8 @@
         </div>
       </div>
 
+      <OpenAIRequestTimezoneField v-if="form.platform === 'openai'" v-model="openAIRequestTimezone" />
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="form.platform === 'openai' && form.type === 'oauth'"
@@ -3416,9 +3428,9 @@
         </div>
       </div>
 
-      <!-- Anthropic API Key: Web Search Emulation (hidden when global disabled) -->
+      <!-- API Key: Web Search Emulation (hidden when global disabled) -->
       <div
-        v-if="form.platform === 'anthropic' && accountCategory === 'apikey' && webSearchGlobalEnabled"
+        v-if="supportsWebSearchEmulation(form.platform) && form.type === 'apikey' && webSearchGlobalEnabled"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -3469,6 +3481,15 @@
         </div>
       </div>
 
+      <div v-if="form.platform === 'openai' && accountCategory === 'oauth-based'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label" for="codex-ticket-create-policy">{{ t('admin.accounts.openai.codexTicketAccountPolicy') }}</label>
+        <select id="codex-ticket-create-policy" v-model="codexTicketAccountPolicy" class="input" data-testid="codex-ticket-create-policy">
+          <option value="inherit">{{ t('admin.accounts.openai.codexTicketPolicyInherit') }}</option>
+          <option value="allow">{{ t('admin.accounts.openai.codexTicketPolicyAllow') }}</option>
+          <option value="deny">{{ t('admin.accounts.openai.codexTicketPolicyDeny') }}</option>
+        </select>
+        <p class="input-hint">{{ t('admin.accounts.openai.codexTicketAccountPolicyDesc') }}</p>
+      </div>
       <div
         v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -3804,9 +3825,14 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
+        <button v-if="form.platform === 'openai_bps'" type="submit" form="create-account-form" :disabled="submitting"
+          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
+          {{ t('admin.accounts.bps.saveAndTest') }}
+        </button>
         <button
           type="submit"
           form="create-account-form"
+          @click="bpsTestAfterSave = false"
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -4098,6 +4124,17 @@
     </template>
   </BaseDialog>
 
+  <ConfirmDialog
+    :show="pendingBPSCreate !== null"
+    :title="t('admin.accounts.bps.riskConfirmTitle')"
+    :message="t('admin.accounts.bps.riskConfirmMessage')"
+    :confirm-text="t('admin.accounts.bps.riskConfirmButton')"
+    :cancel-text="t('common.cancel')"
+    :danger="true"
+    data-testid="bps-risk-confirmation"
+    @confirm="confirmBPSRisk"
+    @cancel="cancelBPSRisk"
+  />
   <!-- Mixed Channel Warning Dialog -->
   <ConfirmDialog
     :show="showMixedChannelWarning"
@@ -4112,6 +4149,8 @@
 </template>
 
 <script setup lang="ts">
+import OpenAIBPSAccountFields from './OpenAIBPSAccountFields.vue'
+import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -4141,6 +4180,7 @@ import type {
   AdminGroup,
   AccountPlatform,
   AccountType,
+  Account,
   CheckMixedChannelResponse,
   CreateAccountRequest,
   CodexSessionImportMessage,
@@ -4154,6 +4194,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import OpenAIRequestTimezoneField from '@/components/account/OpenAIRequestTimezoneField.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -4203,6 +4244,7 @@ import {
   parseDateTimeLocalInput
 } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import { supportsWebSearchEmulation } from '@/utils/webSearchEmulation'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
@@ -4255,7 +4297,7 @@ const withUpstreamRequestIdHeader = <T extends Record<string, unknown> | undefin
 const baseUrlHint = computed(() => {
   if (form.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (form.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
-  if (form.platform === 'grok') return ''
+  if (form.platform === 'grok' || form.platform === 'typesafe') return ''
   return t('admin.accounts.baseUrlHint')
 })
 
@@ -4320,6 +4362,7 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
+  test: [account: Account]
   created: []
 }>()
 
@@ -4700,6 +4743,7 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
+const openAIRequestTimezone = ref('Asia/Singapore')
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -4711,6 +4755,8 @@ const openAIImagesUrlToB64JsonEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+type CodexTicketAccountPolicy = 'inherit' | 'allow' | 'deny'
+const codexTicketAccountPolicy = ref<CodexTicketAccountPolicy>('inherit')
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
@@ -5018,6 +5064,10 @@ const tempUnschedPresets = computed(() => [
   }
 ])
 
+const bpsDraft = ref(newBPSAccountDraft())
+const bpsTestAfterSave = ref(false)
+const pendingBPSCreate = ref<{ payload: CreateAccountRequest; testAfterSave: boolean } | null>(null)
+
 const form = reactive({
   name: '',
   notes: '',
@@ -5035,6 +5085,7 @@ const form = reactive({
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
+  if (form.platform === 'openai_bps') return false
   // Antigravity upstream 类型不需要 OAuth 流程
   if (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream') {
     return false
@@ -5109,6 +5160,11 @@ watch(
 watch(
   [accountCategory, addMethod, antigravityAccountType, () => form.platform],
   ([category, method, agType]) => {
+    // BPS uses its access-token panel, never the generic API-key inputs.
+    if (form.platform === 'openai_bps') {
+      form.type = 'oauth'
+      return
+    }
     // Antigravity upstream 类型（实际创建为 apikey）
     if (form.platform === 'antigravity' && agType === 'upstream') {
       form.type = 'apikey'
@@ -5215,12 +5271,13 @@ watch(
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
+      codexTicketAccountPolicy.value = 'inherit'
     }
     if (newPlatform !== 'anthropic') {
       anthropicPassthroughEnabled.value = false
       anthropicAPIKeyAuthScheme.value = 'x_api_key'
-      webSearchEmulationMode.value = 'default'
     }
+    webSearchEmulationMode.value = 'default'
     // 请求头覆写为平台相关配置（常用头集合不同），切换平台时清空，
     // 避免上一平台的配置行被提交到新平台账号
     headerOverrideEnabled.value = false
@@ -5240,7 +5297,7 @@ watch(
 
 // Gemini AI Studio OAuth availability (requires operator-configured OAuth client)
 watch(
-  [accountCategory, () => form.platform],
+  [accountCategory, () => form.platform, () => form.type],
   ([category, platform]) => {
     if (platform === 'openai' && category !== 'oauth-based') {
       codexCLIOnlyEnabled.value = false
@@ -5249,6 +5306,8 @@ watch(
     if (platform !== 'anthropic' || category !== 'apikey') {
       anthropicPassthroughEnabled.value = false
       anthropicAPIKeyAuthScheme.value = 'x_api_key'
+    }
+    if (form.type !== 'apikey' || !supportsWebSearchEmulation(platform)) {
       webSearchEmulationMode.value = 'default'
     }
   }
@@ -5587,8 +5646,10 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
       }
     }
     appStore.showSuccess(t('admin.accounts.accountCreated'))
+    const openBPSTest = payload.platform === 'openai_bps' && bpsTestAfterSave.value
     emit('created')
     handleClose()
+    if (openBPSTest) emit('test', account)
   } catch (error: any) {
     if (error.response?.status === 409 && error.response?.data?.error === 'mixed_channel_warning' && needsMixedChannelCheck(form.platform)) {
       openMixedChannelDialog({
@@ -5608,10 +5669,14 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  pendingBPSCreate.value = null
+  bpsDraft.value = newBPSAccountDraft()
+  bpsTestAfterSave.value = false
   step.value = 1
   form.name = ''
   form.notes = ''
   form.platform = 'anthropic'
+  openAIRequestTimezone.value = 'Asia/Singapore'
   form.type = 'oauth'
   form.credentials = {}
   form.proxy_id = null
@@ -5677,6 +5742,7 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexTicketAccountPolicy.value = 'inherit'
   codexFingerprintMode.value = 'off'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5729,6 +5795,8 @@ const resetForm = () => {
 }
 
 const handleClose = () => {
+  pendingBPSCreate.value = null
+  bpsTestAfterSave.value = false
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -5740,6 +5808,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  extra.openai_request_timezone = openAIRequestTimezone.value
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -5764,6 +5833,9 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
   extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
 
+  if (accountCategory.value === 'oauth-based' && codexTicketAccountPolicy.value !== 'inherit') {
+    extra.codex_allow_without_ticket = codexTicketAccountPolicy.value === 'allow'
+  }
   if (accountCategory.value === 'oauth-based' && codexCLIOnlyEnabled.value) {
     extra.codex_cli_only = true
   } else {
@@ -5837,6 +5909,14 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   } else {
     delete extra.anthropic_apikey_auth_scheme
   }
+  return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const buildWebSearchExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  if (!supportsWebSearchEmulation(form.platform) || form.type !== 'apikey') {
+    return base
+  }
+  const extra: Record<string, unknown> = { ...(base || {}) }
   if (webSearchEmulationMode.value === 'default') {
     delete extra.web_search_emulation
   } else {
@@ -5847,7 +5927,28 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
 }
 
 // Helper function to create account with mixed channel warning handling
-const doCreateAccount = async (payload: CreateAccountRequest) => {
+const cancelBPSRisk = () => {
+  pendingBPSCreate.value = null
+  bpsTestAfterSave.value = false
+}
+watch(() => [props.show, form.platform] as const, ([shown, platform]) => {
+  if (!shown || platform !== 'openai_bps') cancelBPSRisk()
+})
+const confirmBPSRisk = async () => {
+  const pending = pendingBPSCreate.value
+  if (!pending || submitting.value || !props.show) return
+  pendingBPSCreate.value = null
+  bpsTestAfterSave.value = pending.testAfterSave
+  await doCreateAccount(pending.payload, true)
+}
+const doCreateAccount = async (payload: CreateAccountRequest, bpsRiskConfirmed = false) => {
+  if (payload.platform === 'openai_bps') {
+    if (submitting.value || pendingBPSCreate.value) return
+    if (!bpsRiskConfirmed) {
+      pendingBPSCreate.value = { payload: JSON.parse(JSON.stringify(payload)), testAfterSave: bpsTestAfterSave.value }
+      return
+    }
+  }
   const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
     await submitCreateAccount(payload)
   })
@@ -5938,6 +6039,11 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (form.platform === 'openai_bps') {
+    if (!bpsDraft.value.token.trim()) { appStore.showError(t('admin.accounts.bps.tokenRequired')); return }
+    await createAccountAndFinish('openai_bps', 'oauth', bpsCredentials(bpsDraft.value))
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {
@@ -6215,7 +6321,7 @@ const handleSubmit = async () => {
   }
 
   form.credentials = credentials
-  const extra = buildAnthropicExtra(buildOpenAIExtra())
+  const extra = buildWebSearchExtra(buildAnthropicExtra(buildOpenAIExtra()))
 
   await doCreateAccount({
     ...form,
@@ -6283,7 +6389,7 @@ const createAccountAndFinish = async (
     return
   }
   // Inject quota limits for apikey/bedrock accounts
-  let finalExtra = withUpstreamRequestIdHeader(extra)
+  let finalExtra = withUpstreamRequestIdHeader(buildWebSearchExtra(extra))
   if (type === 'apikey' || type === 'bedrock') {
     const quotaExtra: Record<string, unknown> = { ...(finalExtra || {}) }
     if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {

@@ -95,6 +95,9 @@ dist/
 build/
 release/
 
+# Local deployment artifacts and private rollout state
+/.local-releases/
+
 # 后端嵌入的前端构建产物
 # Keep a placeholder file so `//go:embed all:dist` always has a match in CI/lint,
 # while still ignoring generated frontend build outputs.
@@ -143,8 +146,11 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/SERIAL_MODEL_TESTS.md
 !docs/CODEX_OAUTH_PROTOCOL_REFERENCE.md
+!docs/openai-bps.md
+!docs/openai-bps-sources.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/CODEX_PROBE_TEMPLATE.md
 !docs/codex-credits.md
 !docs/legal/
 !docs/legal/*.md
@@ -172,3 +178,9 @@ deploy/.hz-private/
 # Private single-host release state (contains application data and credentials)
 /deploy/.bluegreen/
 /deploy/__pycache__/
+!scripts/
+scripts/*
+!scripts/release/
+!scripts/release/**
+__pycache__/
+*.pyc

@@ -90,7 +90,7 @@ func TestGetWebSearchEmulationMode_OpenAIAPIKey(t *testing.T) {
 	a := &Account{
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeAPIKey,
-		Extra:    map[string]any{featureKeyWebSearchEmulation: "enabled"},
+		Extra:    map[string]any{featureKeyWebSearchEmulation: WebSearchModeEnabled},
 	}
 	require.Equal(t, WebSearchModeEnabled, a.GetWebSearchEmulationMode())
 }
@@ -114,10 +114,14 @@ func TestGetWebSearchEmulationMode_OtherPlatform(t *testing.T) {
 }
 
 func TestGetWebSearchEmulationMode_NonAPIKeyType(t *testing.T) {
-	a := &Account{
-		Platform: PlatformAnthropic,
-		Type:     AccountTypeOAuth,
-		Extra:    map[string]any{featureKeyWebSearchEmulation: "enabled"},
+	for _, platform := range []string{PlatformAnthropic, PlatformOpenAI, PlatformOpenAIBPS, PlatformAntigravity} {
+		t.Run(platform, func(t *testing.T) {
+			a := &Account{
+				Platform: platform,
+				Type:     AccountTypeOAuth,
+				Extra:    map[string]any{featureKeyWebSearchEmulation: WebSearchModeEnabled},
+			}
+			require.Equal(t, WebSearchModeDefault, a.GetWebSearchEmulationMode())
+		})
 	}
-	require.Equal(t, WebSearchModeDefault, a.GetWebSearchEmulationMode())
 }

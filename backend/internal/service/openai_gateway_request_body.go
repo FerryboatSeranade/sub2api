@@ -187,7 +187,7 @@ func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte
 	if err != nil {
 		return normalized
 	}
-	return rebuilt
+	return restoreOpenAIUpstreamJSONTopLevelOrder(normalized, rebuilt)
 }
 
 func shouldAliasDeepSeekResponsesInputImages(account *Account) bool {
@@ -497,7 +497,7 @@ func SanitizeOpenAICrossModeFailoverReasoning(body []byte) (sanitized []byte, ch
 	if marshalErr != nil {
 		return body, false, fmt.Errorf("serialize cross-mode failover body: %w", marshalErr)
 	}
-	return out, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, out), true, nil
 }
 
 // dropOpenAIEncryptedReasoningInputItems removes reasoning input items that carry
@@ -726,7 +726,7 @@ func normalizeOpenAIResponsesReasoningContentReplay(body []byte) ([]byte, bool, 
 	if err != nil {
 		return body, false, fmt.Errorf("serialize normalized OpenAI reasoning content replay: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body []byte, knownStoreFalse bool) ([]byte, bool, error) {
@@ -872,11 +872,11 @@ func normalizeOpenAIAPIKeyStoreFalseReasoningReplayDecoded(body []byte, knownSto
 	if err != nil {
 		return body, false, fmt.Errorf("serialize API-key store=false reasoning replay: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAICodexCompactReasoningEffortForAccount(c *gin.Context, account *Account, body []byte) ([]byte, bool, error) {
-	if account == nil || !account.IsOpenAIOAuthLike() || !isOpenAIResponsesCompactPath(c) {
+	if account == nil || !account.IsOpenAIOAuthLike() || !isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c) {
 		return body, false, nil
 	}
 
@@ -1334,7 +1334,7 @@ func normalizeOpenAIOAuthResponsesCompatibilityBody(body []byte) ([]byte, bool, 
 }
 
 func normalizeGPT6ResponsesSampling(body []byte, model string) ([]byte, bool, error) {
-	if (!openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
+	if !openai.IsGPT6SolFamilyModelSpelling(model) || (openai.IsGPT6SolOrLunaModelSpelling(model) && gjson.GetBytes(body, "reasoning.effort").String() == "none") {
 		return body, false, nil
 	}
 	out := body
@@ -1423,11 +1423,11 @@ func normalizeOpenAIResponseFormatSchemasBody(body []byte) ([]byte, bool, error)
 	if !normalizeOpenAIResponseFormatSchemas(reqBody) {
 		return body, false, nil
 	}
-	normalized, err := json.Marshal(reqBody)
+	normalized, err := marshalOpenAIUpstreamJSON(reqBody)
 	if err != nil {
 		return body, false, fmt.Errorf("serialize normalized responses schema body: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool) ([]byte, bool, error) {
@@ -1542,9 +1542,13 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			mapChanged = true
 		}
 		if mapChanged {
+			previous := normalized
 			next, err := marshalOpenAIUpstreamJSON(reqBody)
 			if err != nil {
 				return body, false, fmt.Errorf("serialize normalized websocket Responses body: %w", err)
+			}
+			if account.UsesOpenAICodexProtocol() {
+				next = restoreOpenAIUpstreamJSONTopLevelOrder(previous, next)
 			}
 			normalized = next
 			changed = true
@@ -1562,9 +1566,13 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 			return body, false, fmt.Errorf("normalize websocket image tool body: %w", err)
 		}
 		if normalizeOpenAIResponsesImageGenerationTools(reqBody) {
-			next, err := json.Marshal(reqBody)
+			previous := normalized
+			next, err := marshalOpenAIUpstreamJSON(reqBody)
 			if err != nil {
 				return body, false, fmt.Errorf("serialize normalized websocket image tool body: %w", err)
+			}
+			if account.UsesOpenAICodexProtocol() {
+				next = restoreOpenAIUpstreamJSONTopLevelOrder(previous, next)
 			}
 			normalized = next
 			changed = true
@@ -2399,7 +2407,7 @@ func sanitizeEmptyBase64InputImagesInOpenAIBody(body []byte) ([]byte, bool, erro
 	if err != nil {
 		return body, false, fmt.Errorf("serialize sanitized request body: %w", err)
 	}
-	return normalized, true, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(body, normalized), true, nil
 }
 
 func sanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(reqBody map[string]any) bool {
@@ -2570,9 +2578,6 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 }
 
 func normalizeOpenAIReasoningEffortForModel(raw, model string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), "none") && openai.IsGPT6SolOrLunaModelSpelling(model) {
-		return "none"
-	}
 	if strings.EqualFold(strings.TrimSpace(raw), "max") && supportsOpenAIReasoningEffortMax(model) {
 		return "max"
 	}
@@ -2603,9 +2608,9 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 	}
 }
 
-// validateGPT61SolCompatRequest runs after model mapping, before conversion can
-// discard unsupported explicit effort selections or disabled thinking.
-func validateGPT61SolCompatRequest(body []byte, model string) error {
+// validateGPT61SolCompatRequest runs after model mapping, before conversions
+// can discard explicit effort selections or disabled thinking.
+func validateGPT61SolCompatRequest(body []byte, model string, mappedModels ...string) error {
 	if !openai.IsGPT61SolModelSpelling(model) {
 		return nil
 	}
@@ -2614,14 +2619,45 @@ func validateGPT61SolCompatRequest(body []byte, model string) error {
 			return err
 		}
 	}
-	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
+	if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, "thinking.type").String()), "disabled") {
 		return openai.ValidateGPT61SolReasoningEffort(model, "none")
 	}
-	requestedModel := gjson.GetBytes(body, "model").String()
-	for _, effort := range []string{"none", "minimal"} {
-		if strings.HasSuffix(strings.ToLower(requestedModel), "-"+effort) {
-			return openai.ValidateGPT61SolReasoningEffort(model, effort)
+	for _, candidate := range []string{model, gjson.GetBytes(body, "model").String()} {
+		if err := openai.ValidateGPT61SolReasoningEffort(model, deriveOpenAIReasoningEffortFromModel(candidate)); err != nil {
+			return err
+		}
+	}
+	for _, candidate := range mappedModels {
+		if err := openai.ValidateGPT61SolReasoningEffort(model, deriveOpenAIReasoningEffortFromModel(candidate)); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func normalizeGPT61SolResponsesRequest(body []byte, model string, mappedModels ...string) ([]byte, bool, error) {
+	if !openai.IsGPT61SolModelSpelling(model) {
+		return body, false, nil
+	}
+	if err := validateGPT61SolCompatRequest(body, model, mappedModels...); err != nil {
+		return body, false, err
+	}
+	out := body
+	changed := false
+	if strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String()) == "" {
+		effort := deriveOpenAIReasoningEffortFromModelCandidates([]string{gjson.GetBytes(body, "model").String(), model})
+		if effort == "" {
+			effort = deriveOpenAIReasoningEffortFromModelCandidates(mappedModels)
+		}
+		if effort != "" {
+			var err error
+			out, err = sjson.SetBytes(out, "reasoning.effort", effort)
+			if err != nil {
+				return body, false, err
+			}
+			changed = true
+		}
+	}
+	out, samplingChanged, err := normalizeGPT6ResponsesSampling(out, model)
+	return out, changed || samplingChanged, err
 }

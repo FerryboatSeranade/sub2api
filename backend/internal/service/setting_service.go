@@ -135,9 +135,14 @@ type SettingService struct {
 	codexRestrictionPolicyCache        atomic.Value // *cachedCodexRestrictionPolicy
 	codexRestrictionPolicySF           singleflight.Group
 	openAICodexTicketEnabledCache      atomic.Value // *cachedOpenAICodexTicketEnabled
+	codexTicketCadenceCache            atomic.Value
 	openAICodexTicketEnabledSF         singleflight.Group
+	openAICodexTicketAllowCache        atomic.Value
+	openAICodexTicketAllowSF           singleflight.Group
 	openAICodexTicketHarvestProxyCache atomic.Value // *cachedOpenAICodexTicketHarvestProxy
 	openAICodexTicketHarvestProxySF    singleflight.Group
+	codexProbeTemplateMu               sync.Mutex
+	codexProbeTemplateCache            *cachedCodexProbeTemplate
 
 	cyberSessionBlockRuntimeMu    sync.Mutex
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime

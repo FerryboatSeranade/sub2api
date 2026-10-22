@@ -252,6 +252,7 @@ const { t } = useI18n()
 const PLATFORM_LABELS: Record<string, string> = {
   anthropic: 'Claude',
   openai: 'OpenAI',
+  openai_bps: 'OpenAI BPS',
   gemini: 'Gemini',
   antigravity: 'Antigravity',
   grok: 'Grok',
@@ -286,7 +287,7 @@ const platformCards = computed<FusedPlatformCard[]>(() => {
     if (hasAnyLimit(q)) platforms.add(platform)
   }
 
-  const PLATFORM_ORDER = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'typesafe']
+  const PLATFORM_ORDER = ['anthropic', 'openai', 'openai_bps', 'gemini', 'antigravity', 'grok', 'typesafe']
   const cards: FusedPlatformCard[] = []
 
   for (const p of platforms) {

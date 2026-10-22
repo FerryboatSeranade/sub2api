@@ -216,7 +216,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAffiliateAdminRechargeEnabled: strconv.FormatBool(AdminRechargeRebateEnabledDefault),
 
 		// 风控中心功能（默认关闭，显式启用）
-		SettingKeyRiskControlEnabled: "false",
+		SettingKeyRiskControlEnabled:            "false",
+		SettingKeyUserRequestAuditRetentionDays: "7",
+		SettingKeyUserRequestAuditGroupIDs:      "[]",
 
 		// cyber 会话屏蔽（默认关闭，TTL 默认 3600s）
 		SettingKeyCyberSessionBlockEnabled:    "false",
@@ -247,10 +249,10 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexClientVersion:                           "",
 		SettingKeyOpenAICodexClientVersionSynced:                     "",
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
-		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
 		SettingKeyClaudeCodeClientVersion:                            "",
 		SettingKeyClaudeCodeClientVersionSynced:                      "",
 		SettingKeyClaudeCodeVersionAutoSyncEnabled:                   "true",
+		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -910,6 +912,29 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.ClaudeCodeVersionAutoSyncEnabled = v == "true"
 	} else {
 		result.ClaudeCodeVersionAutoSyncEnabled = true
+	}
+	if v, ok := settings[SettingKeyOpenAICodexTicketEnabled]; ok && v != "" {
+		result.OpenAICodexTicketEnabled = v == "true"
+	} else if s != nil && s.cfg != nil {
+		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
+	}
+	result.OpenAICodexTicketAllowWithoutTicket = s == nil || s.cfg == nil || !s.cfg.Gateway.OpenAICodexTicket.FailClosed
+	if v, ok := settings[SettingKeyOpenAICodexTicketAllowWithoutTicket]; ok && v != "" {
+		result.OpenAICodexTicketAllowWithoutTicket = v == "true"
+	}
+	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
+	result.OpenAICodexTicketPromptTemplate = settings[SettingKeyOpenAICodexTicketPromptTemplate]
+	// 自动降智检测：key 缺失或损坏时回显默认值（默认关闭），
+	// 保证读取路径（GET 回显 / 保存合并）永远拿到可用配置。
+	result.CodexAutoDegradationCheck = DefaultCodexAutoDegradationCheckSettings()
+	if raw := strings.TrimSpace(settings[SettingKeyCodexAutoDegradationCheck]); raw != "" {
+		parsed := *DefaultCodexAutoDegradationCheckSettings()
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			slog.Warn("[Setting] parseSettings: unmarshal codex_auto_degradation_check failed", "error", err)
+		} else {
+			normalizeCodexAutoDegradationCheckSettings(&parsed)
+			result.CodexAutoDegradationCheck = &parsed
+		}
 	}
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]

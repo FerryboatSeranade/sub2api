@@ -39,16 +39,28 @@ describe('AccountPriorityCell', () => {
     expect(wrapper.emitted('updated')?.[0]?.[0]).toMatchObject({ id: 7, priority: 4 })
   })
 
-  it('does not go below 1', async () => {
-    const wrapper = mountCell(account({ priority: 1 }))
-    const dec = wrapper.get('[data-testid="account-priority-decrement"]')
-    expect(dec.attributes('disabled')).toBeDefined()
-    // 到达下限时按钮仍应随悬停显隐，而不是常驻半透明
-    expect(dec.classes()).toContain('opacity-0')
-    expect(dec.classes().some(c => c.startsWith('disabled:opacity'))).toBe(false)
-    await dec.trigger('click')
-    await vi.runAllTimersAsync()
+  it('does not rewrite an existing zero priority when editing ends unchanged', async () => {
+    const wrapper = mountCell(account({ priority: 0 }))
+    await wrapper.get('[data-testid="account-priority-value"]').trigger('click')
+    await wrapper.get('[data-testid="account-priority-input"]').trigger('blur')
+    await flushPromises()
     expect(update).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="account-priority-value"]').text()).toBe('0')
+    wrapper.unmount()
+  })
+
+  it('preserves a large stored priority and decrements it by one', async () => {
+    const wrapper = mountCell(account({ priority: 100000 }))
+    await wrapper.get('[data-testid="account-priority-value"]').trigger('click')
+    await wrapper.get('[data-testid="account-priority-input"]').trigger('blur')
+    await flushPromises()
+    expect(update).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="account-priority-decrement"]').trigger('click')
+    await vi.runAllTimersAsync()
+    await flushPromises()
+    expect(update).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenCalledWith(7, { priority: 99999 })
+    wrapper.unmount()
   })
 
   it('saves a typed value on Enter and ignores unchanged input', async () => {

@@ -1377,9 +1377,17 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		t.Fatal("等待 passthrough websocket 结束超时")
 	}
 
-	require.Equal(t, isolateOpenAIUpstreamSessionID(0, account, "pcache_passthrough"), captureDialer.lastHeaders.Get("session_id"))
+	// 隔离后的 prompt_cache_key 派生会话只走官方连字符头；下划线名在
+	// 官方 WS 握手线序上不存在，收口后必须缺席。
+	require.Equal(t, isolateOpenAIUpstreamSessionID(0, account, "pcache_passthrough"), captureDialer.lastHeaders.Get("session-id"))
+	require.Equal(t, isolateOpenAIUpstreamSessionID(0, account, "pcache_passthrough"), captureDialer.lastHeaders.Get("thread-id"))
+	require.Empty(t, captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
-	require.Equal(t, "turn-meta-1", captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
+	turnMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
+	require.NotEmpty(t, turnMetadata)
+	require.Equal(t, "turn", gjson.Get(turnMetadata, "request_kind").String())
+	require.NotEmpty(t, gjson.Get(turnMetadata, "session_id").String())
+	require.NotEmpty(t, gjson.Get(turnMetadata, "thread_id").String())
 	require.Len(t, upstreamConn.writes, 1)
 	forwarded := requestToJSONString(upstreamConn.writes[0])
 	require.False(t, gjson.Get(forwarded, `tools.#(type=="namespace")`).Exists())
@@ -4324,6 +4332,7 @@ type openAIWSQueueDialer struct {
 	mu        sync.Mutex
 	conns     []openAIWSClientConn
 	dialCount int
+	handshake http.Header
 }
 
 func (d *openAIWSQueueDialer) Dial(
@@ -4346,7 +4355,7 @@ func (d *openAIWSQueueDialer) Dial(
 	if len(d.conns) > 1 {
 		d.conns = d.conns[1:]
 	}
-	return conn, 0, nil, nil
+	return conn, 0, d.handshake.Clone(), nil
 }
 
 func (d *openAIWSQueueDialer) DialCount() int {

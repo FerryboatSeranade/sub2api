@@ -96,14 +96,35 @@ func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw 
 	if raw == "" || namespace == "" {
 		return raw
 	}
-	return deriveStableUUIDv4(fmt.Sprintf(
+	// Window IDs carry the thread identity and its context-window ordinal.
+	// Hashing the whole value loses that relationship after compaction.
+	if kind == "window" {
+		if thread, ordinal, ok := splitCodexWindowID(raw); ok {
+			return scopeCodexAccountIdentityValue(account, apiKeyID, "thread", thread) + ":" + ordinal
+		}
+	}
+	seed := fmt.Sprintf(
 		"sub2api:codex-account-identity:%s:user:%d:account:%s:kind:%s:value:%s",
 		codexAccountIdentityNamespaceVersion,
 		apiKeyID,
 		namespace,
 		kind,
 		raw,
-	))
+	)
+	// 官方 session_id / thread_id / turn_id 恒为 Uuid::now_v7()，installation_id
+	// 才是 Uuid::new_v4()。改写成账号级值时必须保持同一版本，否则出站头的
+	// 版本半字节（v4 vs v7）与官方客户端逐字节不一致；同时保留原值的 v7
+	// 时间戳，使「turn_id 时刻 ≈ turn_started_at」这类官方时间一致性在改写
+	// 后依然成立。原值不是 v7 时退回种子派生的稳定过去锚点。
+	switch kind {
+	case "session", "thread", "turn":
+		anchorMs, ok := codexV7TimestampMs(raw)
+		if !ok {
+			anchorMs = deriveCodexStableTimestampMs(seed)
+		}
+		return deriveStableCodexUUIDv7(seed, anchorMs)
+	}
+	return deriveStableUUIDv4(seed)
 }
 
 var codexAccountIdentityFields = []struct {
@@ -120,7 +141,7 @@ var codexAccountIdentityFields = []struct {
 	{name: "turn-id", kind: "turn"},
 	{name: "window_id", kind: "window"},
 	{name: "x-codex-window-id", kind: "window"},
-	{name: "x-client-request-id", kind: "request"},
+	{name: "x-client-request-id", kind: "thread"},
 }
 
 func applyCodexAccountIdentityFields(values map[string]any, account *Account, apiKeyID int64) bool {
@@ -147,8 +168,8 @@ func applyCodexAccountIdentityEmbeddedMetadata(values map[string]any, account *A
 	if !ok || strings.TrimSpace(raw) == "" {
 		return false
 	}
-	metadata := map[string]any{}
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
+	metadata, err := decodeCodexTurnMetadata(raw)
+	if err != nil || metadata == nil {
 		return false
 	}
 	if !applyCodexAccountIdentityFields(metadata, account, apiKeyID) {
@@ -209,7 +230,7 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 	originalBodySessionID := ""
 	if cm := gjson.GetBytes(body, "client_metadata"); cm.IsObject() {
 		clientMetadata := map[string]any{}
-		if err := json.Unmarshal([]byte(cm.Raw), &clientMetadata); err != nil {
+		if err := decodeCodexMetadataObject(cm.Raw, &clientMetadata); err != nil {
 			return body, false, fmt.Errorf("decode client_metadata for account identity: %w", err)
 		}
 		originalBodySessionID, _ = clientMetadata["session_id"].(string)
@@ -265,8 +286,8 @@ func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, api
 		}
 	}
 	if raw := strings.TrimSpace(headers.Get(openAIWSTurnMetadataHeader)); raw != "" {
-		metadata := map[string]any{}
-		if err := json.Unmarshal([]byte(raw), &metadata); err == nil && metadata != nil && applyCodexAccountIdentityFields(metadata, account, apiKeyID) {
+		metadata, err := decodeCodexTurnMetadata(raw)
+		if err == nil && metadata != nil && applyCodexAccountIdentityFields(metadata, account, apiKeyID) {
 			if rebuilt, err := marshalCodexTurnMetadata(metadata); err == nil {
 				headers.Set(openAIWSTurnMetadataHeader, string(rebuilt))
 			}

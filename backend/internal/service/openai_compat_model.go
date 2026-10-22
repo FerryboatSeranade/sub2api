@@ -24,21 +24,18 @@ func NormalizeOpenAICompatRequestedModel(model string) string {
 }
 
 func applyOpenAICompatModelNormalization(req *apicompat.AnthropicRequest) {
-	if req != nil && openai.IsGPT61SolModelSpelling(req.Model) {
+	if req == nil {
+		return
+	}
+	if openai.IsGPT61SolModelSpelling(req.Model) {
 		canonical := openai.CanonicalizeOpenAIModelAliasSpelling(req.Model)
-		if effort, ok := strings.CutPrefix(canonical, "gpt-6.1-sol-"); ok && effort != "openai-compact" {
-			req.Model = "gpt-6.1-sol"
+		req.Model = "gpt-6.1-sol"
+		if effort, ok := strings.CutPrefix(canonical, "gpt-6.1-sol-"); ok && effort != "openai-compact" && (req.OutputConfig == nil || strings.TrimSpace(req.OutputConfig.Effort) == "") {
 			if req.OutputConfig == nil {
 				req.OutputConfig = &apicompat.AnthropicOutputConfig{}
 			}
-			if req.OutputConfig.Effort == "" {
-				req.OutputConfig.Effort = effort
-			}
-			return
+			req.OutputConfig.Effort = effort
 		}
-	}
-
-	if req == nil {
 		return
 	}
 

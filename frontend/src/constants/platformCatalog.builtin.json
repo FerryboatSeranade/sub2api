@@ -278,6 +278,12 @@
           }
         ]
       }
+    },
+    {
+      "id": "openai_bps",
+      "display_name": "OpenAI BPS",
+      "gateway": "openai",
+      "cn_provider": false
     }
   ],
   "composite_precedence": [
@@ -293,6 +299,7 @@
     "opencode_go",
     "typesafe",
     "command_code",
-    "cline"
+    "cline",
+    "openai_bps"
   ]
 }

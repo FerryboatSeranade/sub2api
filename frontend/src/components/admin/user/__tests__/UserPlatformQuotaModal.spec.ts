@@ -75,9 +75,16 @@ beforeEach(() => {
 })
 
 describe('UserPlatformQuotaModal', () => {
-  it.each([0, 4, 14, 17])('does not turn a negative limit in input %s into unlimited', async (index) => {
+  it.each([
+    ['anthropic', 'daily'],
+    ['openai', 'weekly'],
+    ['antigravity', 'monthly'],
+    ['typesafe', 'monthly'],
+  ] as const)('does not turn a negative %s %s limit into unlimited', async (platform, window) => {
     const w = await mountAndOpen()
-    await w.findAll('input[type=number]')[index].setValue('-1')
+    const row = w.findAll('tbody tr').find(r => r.get('td').text() === platform)!
+    const column = w.findAll('thead th').findIndex(th => th.text() === `admin.users.platformQuota.columns.${window}`)
+    await row.findAll('td')[column].get('input[type=number]').setValue('-1')
     await w.findAll('button').find(b => b.text() === 'admin.users.platformQuota.save')!.trigger('click')
     await flushPromises()
     expect(apiMocks.updatePlatformQuotas).not.toHaveBeenCalled()
@@ -140,8 +147,7 @@ describe('UserPlatformQuotaModal', () => {
       expect(apiMocks.updatePlatformQuotas.mock.calls[0][1]).toHaveLength(13)
       expect(w.emitted('success')).toHaveLength(1)
       w.unmount()
-    },
-  )
+  })
 
   it('已有数据正确填充 limit input', async () => {
     apiMocks.getPlatformQuotas.mockResolvedValueOnce({

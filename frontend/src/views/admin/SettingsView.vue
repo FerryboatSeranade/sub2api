@@ -4045,7 +4045,7 @@
                   </p>
                 </div>
                 <div class="overflow-x-auto">
-                  <table class="min-w-full text-sm">
+                  <table class="min-w-full text-sm" data-testid="default-platform-quotas">
                     <thead>
                       <tr class="text-left text-xs text-gray-500 dark:text-gray-400">
                         <th class="pb-2 pr-4 font-medium">{{ t("admin.settings.platformQuota.platform") }}</th>
@@ -4516,27 +4516,106 @@
                     v-model="form.openai_codex_ticket_enabled"
                   />
                 </div>
-                <div>
-                  <h3 class="text-base font-semibold text-gray-900 dark:text-white">
-                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxy") }}
-                  </h3>
-                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyDesc") }}
-                  </p>
-                  <input
-                    id="codex-ticket-harvest-proxy"
-                    v-model="form.openai_codex_ticket_harvest_proxy_url"
-                    type="text"
-                    class="input mt-3 w-full font-mono text-sm"
-                    :placeholder="t('admin.settings.gatewayForwarding.codexTicketHarvestProxyPlaceholder')"
-                    autocomplete="off"
-                  />
-                  <p
-                    v-if="form.openai_codex_ticket_harvest_proxy_configured"
-                    class="mt-1.5 text-xs text-gray-500 dark:text-gray-400"
-                  >
-                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyConfigured") }}
-                  </p>
+                <div class="flex items-center justify-between gap-4">
+                  <div class="min-w-0">
+                    <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t("admin.settings.gatewayForwarding.codexTicketAllowWithoutTicket") }}</h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayForwarding.codexTicketAllowWithoutTicketDesc") }}</p>
+                  </div>
+                  <Toggle id="codex-ticket-allow-without" v-model="form.openai_codex_ticket_allow_without_ticket" />
+                </div>
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between gap-3">
+                    <label for="codex-probe-template" class="text-base font-semibold text-gray-900 dark:text-white">{{ t("admin.settings.gatewayForwarding.codexProbeTemplate") }}</label>
+                    <button type="button" class="btn btn-secondary btn-sm" data-testid="codex-probe-template-reset" :disabled="saving || !form.openai_codex_ticket_prompt_template_default" @click="form.openai_codex_ticket_prompt_template = form.openai_codex_ticket_prompt_template_default">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateReset") }}</button>
+                  </div>
+                  <p id="codex-probe-template-help" class="text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayForwarding.codexProbeTemplateDesc") }}</p>
+                  <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                    <span v-for="placeholder in codexProbeTemplatePlaceholders" :key="placeholder.token"><code class="font-mono">{{ placeholder.token }}</code> — {{ t(placeholder.label) }}</span>
+                  </div>
+                  <textarea id="codex-probe-template" v-model="form.openai_codex_ticket_prompt_template" data-testid="codex-probe-template" aria-describedby="codex-probe-template-help" class="input w-full font-mono text-xs" rows="12" wrap="off" :spellcheck="false" :disabled="saving" />
+                </div>
+                <CodexTicketCadenceSettings ref="codexTicketCadenceRef" :saving="saving" />
+                <!-- 自动降智检测 -->
+                <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div class="flex items-center justify-between gap-4">
+                    <div class="min-w-0">
+                      <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+                        {{ t("admin.settings.gatewayForwarding.codexAutoDegradationEnabled") }}
+                      </h3>
+                      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.gatewayForwarding.codexAutoDegradationEnabledDesc") }}
+                      </p>
+                    </div>
+                    <Toggle
+                      id="codex-auto-degradation-enabled"
+                      v-model="form.codex_auto_degradation_check.enabled"
+                    />
+                  </div>
+                  <div class="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                        for="codex-auto-degradation-interval"
+                      >
+                        {{ t("admin.settings.gatewayForwarding.codexAutoDegradationInterval") }}
+                      </label>
+                      <input
+                        id="codex-auto-degradation-interval"
+                        v-model.number="form.codex_auto_degradation_check.interval_minutes"
+                        type="number"
+                        min="1"
+                        step="1"
+                        class="input w-32"
+                        :disabled="saving"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                        for="codex-auto-degradation-block"
+                      >
+                        {{ t("admin.settings.gatewayForwarding.codexAutoDegradationBlock") }}
+                      </label>
+                      <input
+                        id="codex-auto-degradation-block"
+                        v-model.number="form.codex_auto_degradation_check.block_minutes"
+                        type="number"
+                        min="1"
+                        step="1"
+                        class="input w-32"
+                        :disabled="saving"
+                      />
+                    </div>
+                  </div>
+                  <div class="mt-4">
+                    <label class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayForwarding.codexAutoDegradationModels") }}
+                    </label>
+                    <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.codexAutoDegradationModelsDesc") }}
+                    </p>
+                    <div class="flex flex-wrap gap-x-5 gap-y-2">
+                      <label
+                        v-for="model in codexAutoDegradationModelChoices"
+                        :key="model"
+                        class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="form.codex_auto_degradation_check.models.includes(model)"
+                          :disabled="saving"
+                          @change="toggleCodexAutoDegradationModel(model, $event)"
+                        />
+                        <span class="font-mono">{{ model }}</span>
+                      </label>
+                      <span
+                        v-if="codexAutoDegradationModelChoices.length === 0"
+                        class="text-xs text-gray-400 dark:text-gray-500"
+                      >
+                        {{ t("admin.settings.gatewayForwarding.codexAutoDegradationModelsEmpty") }}
+                      </span>
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <h3 class="text-base font-semibold text-gray-900 dark:text-white">
@@ -8938,7 +9017,7 @@
         </div>
 
         <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <div v-show="activeTab !== 'backup'" class="settings-save-bar flex justify-end">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -9011,10 +9090,12 @@
 </template>
 
 <script setup lang="ts">
+import CodexTicketCadenceSettings from '@/components/admin/account/CodexTicketCadenceSettings.vue'
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
+import { fingerprint as fetchCodexFingerprint } from "@/api/admin/codexTickets";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
   buildAuthSourceDefaultsState,
@@ -9031,6 +9112,7 @@ import {
 import type {
   AuthSourceDefaultsState,
   AuthSourceType,
+  CodexAutoDegradationCheckSettings,
   SystemSettings,
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
@@ -9070,6 +9152,7 @@ import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import RechargeBonusTierEditor from "@/components/admin/settings/RechargeBonusTierEditor.vue";
 import {
+  getRechargeBonusTierDraftError,
   normalizeRechargeBonusMode,
   normalizeRechargeBonusTiers,
   sanitizeRechargeBonusTiersForSubmit,
@@ -9137,6 +9220,7 @@ type SettingsTab =
   | "email"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
+const codexTicketCadenceRef = ref<InstanceType<typeof CodexTicketCadenceSettings> | null>(null);
 const settingsTabs = [
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
@@ -10066,13 +10150,23 @@ const form = reactive<SettingsForm>({
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
   openai_codex_client_version_synced: "",
   openai_codex_version_auto_sync_enabled: true,
-  openai_codex_ticket_enabled: false,
-  openai_codex_ticket_harvest_proxy_url: "",
-  openai_codex_ticket_harvest_proxy_configured: false,
   claude_code_client_version: "",
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
   claude_code_client_version_synced: "",
   claude_code_version_auto_sync_enabled: true,
+  openai_codex_ticket_enabled: false,
+  openai_codex_ticket_allow_without_ticket: true,
+  openai_codex_ticket_prompt_template: "",
+  openai_codex_ticket_prompt_template_default: "",
+  openai_codex_ticket_harvest_proxy_url: "",
+  openai_codex_ticket_harvest_proxy_configured: false,
+  // 自动降智检测（默认关闭；loadSettings 会用后端回显覆盖）
+  codex_auto_degradation_check: {
+    enabled: false,
+    interval_minutes: 10,
+    block_minutes: 30,
+    models: ["gpt-6.1-sol"],
+  },
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -11001,6 +11095,91 @@ const codexFingerprintRows = ref<FingerprintSignalRow[]>([]);
 const codexFingerprintNoRequired = computed(
   () => !codexFingerprintRows.value.some((r) => r.required),
 );
+
+// 自动降智检测：可选模型来自指纹库版本接口；当前已选但不在库中的模型
+// 同样保留在选项里，否则已保存的选择会从界面上消失、无法取消。
+const codexAutoDegradationFingerprintModels = ref<string[]>([]);
+const codexAutoDegradationModelChoices = computed<string[]>(() => {
+  const selected = Array.isArray(form.codex_auto_degradation_check?.models)
+    ? form.codex_auto_degradation_check.models
+    : [];
+  const merged: string[] = [];
+  for (const model of [...codexAutoDegradationFingerprintModels.value, ...selected]) {
+    if (model && !merged.includes(model)) merged.push(model);
+  }
+  return merged;
+});
+
+function toggleCodexAutoDegradationModel(model: string, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked;
+  const models = new Set(form.codex_auto_degradation_check.models ?? []);
+  if (checked) {
+    models.add(model);
+  } else {
+    models.delete(model);
+  }
+  form.codex_auto_degradation_check.models = [...models];
+}
+
+function normalizeCodexAutoDegradationCheck(value: unknown): CodexAutoDegradationCheckSettings {
+  const fallback: CodexAutoDegradationCheckSettings = {
+    enabled: false,
+    interval_minutes: 10,
+    block_minutes: 30,
+    models: ["gpt-6.1-sol"],
+  };
+  if (!value || typeof value !== "object") return fallback;
+  const source = value as Partial<CodexAutoDegradationCheckSettings>;
+  const interval = Math.floor(Number(source.interval_minutes));
+  const block = Math.floor(Number(source.block_minutes));
+  return {
+    enabled: Boolean(source.enabled),
+    interval_minutes: Number.isFinite(interval) && interval >= 1 ? interval : fallback.interval_minutes,
+    block_minutes: Number.isFinite(block) && block >= 1 ? block : fallback.block_minutes,
+    models:
+      Array.isArray(source.models) && source.models.length > 0
+        ? source.models.map((model) => String(model)).filter(Boolean)
+        : fallback.models,
+  };
+}
+
+// 提交前只做去空白/去重与数值规整（NaN→0），不静默修复 0 或空数组：
+// 非法值交给后端校验，换取明确的错误信息。
+function sanitizeCodexAutoDegradationCheck(value: unknown): CodexAutoDegradationCheckSettings {
+  const source: Partial<CodexAutoDegradationCheckSettings> =
+    value && typeof value === "object" ? (value as Partial<CodexAutoDegradationCheckSettings>) : {};
+  return {
+    enabled: Boolean(source.enabled),
+    interval_minutes: Math.floor(Number(source.interval_minutes)) || 0,
+    block_minutes: Math.floor(Number(source.block_minutes)) || 0,
+    models: Array.isArray(source.models)
+      ? [...new Set(source.models.map((model) => String(model).trim()).filter(Boolean))]
+      : [],
+  };
+}
+
+async function loadCodexAutoDegradationModels() {
+  try {
+    const result = await fetchCodexFingerprint();
+    codexAutoDegradationFingerprintModels.value = Array.isArray(result?.models)
+      ? result.models.filter((model) => typeof model === "string" && model)
+      : [];
+  } catch {
+    codexAutoDegradationFingerprintModels.value = [];
+  }
+}
+
+// 模型候选按需拉取：只有真正进入网关 Tab（本设置所在分组）时才请求
+// 指纹库版本接口——设置页默认落在常规 Tab，多数访问不需要这发请求，
+// 接口失败也只影响候选列表，不阻塞设置页本身。
+watch(
+  () => activeTab.value,
+  (tab) => {
+    if (tab === "gateway") {
+      void loadCodexAutoDegradationModels();
+    }
+  },
+);
 function addCodexFingerprintRow(): void {
   codexFingerprintRows.value.push({ type: "header_exact", match: "", required: false });
 }
@@ -11081,6 +11260,13 @@ const claudeSyncedVersionLabel = computed(() => {
   });
 });
 
+const codexProbeTemplatePlaceholders = [
+  { token: '{{TIMEZONE}}', label: 'admin.settings.gatewayForwarding.codexProbeTimezone' },
+  { token: '{{CURRENT_DATE}}', label: 'admin.settings.gatewayForwarding.codexProbeDate' },
+  { token: '{{MODEL}}', label: 'admin.settings.gatewayForwarding.codexProbeModel' },
+  { token: '{{MODELTRACE_PROMPT}}', label: 'admin.settings.gatewayForwarding.codexProbeChallenge' },
+];
+
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
@@ -11098,6 +11284,9 @@ async function loadSettings() {
     if (settings.openai_oauth_scheduling_rate_multiplier === null) {
       form.openai_oauth_scheduling_rate_multiplier = null;
     }
+    form.codex_auto_degradation_check = normalizeCodexAutoDegradationCheck(
+      settings.codex_auto_degradation_check,
+    );
     syncCaptchaProviderSelection();
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
@@ -11356,6 +11545,25 @@ const siteBillingModeHint = computed(() =>
 );
 
 async function saveSettings() {
+  const cadence = codexTicketCadenceRef.value;
+  try {
+    if (activeTab.value === "gateway" || cadence?.isDirty?.()) cadence?.validate?.();
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t("admin.settings.failedToSave")));
+    return;
+  }
+  for (let index = 0; index < form.payment_recharge_bonus_tiers.length; index++) {
+    const error = getRechargeBonusTierDraftError(
+      form.payment_recharge_bonus_tiers,
+      index,
+      form.payment_recharge_bonus_mode,
+    );
+    if (error) {
+      appStore.showError(t(`admin.settings.payment.rechargeBonus.${error}`));
+      return;
+    }
+  }
+  let settingsSaved = false;
   saving.value = true;
   try {
     const normalizedTableDefaultPageSize = Math.floor(
@@ -11721,12 +11929,18 @@ async function saveSettings() {
         form.openai_codex_client_version?.trim() || "",
       openai_codex_version_auto_sync_enabled:
         form.openai_codex_version_auto_sync_enabled,
-      openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
-      openai_codex_ticket_harvest_proxy_url:
-        form.openai_codex_ticket_harvest_proxy_url?.trim() || "",
       claude_code_client_version: form.claude_code_client_version?.trim() || "",
       claude_code_version_auto_sync_enabled:
         form.claude_code_version_auto_sync_enabled,
+      openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
+      openai_codex_ticket_allow_without_ticket: form.openai_codex_ticket_allow_without_ticket,
+      openai_codex_ticket_prompt_template:
+        form.openai_codex_ticket_prompt_template === form.openai_codex_ticket_prompt_template_default
+          ? ""
+          : form.openai_codex_ticket_prompt_template,
+      codex_auto_degradation_check: sanitizeCodexAutoDegradationCheck(
+        form.codex_auto_degradation_check,
+      ),
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:
@@ -11887,6 +12101,8 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    settingsSaved = true;
+    if (cadence?.isDirty?.()) await cadence.save();
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {
@@ -11971,6 +12187,10 @@ async function saveSettings() {
       appStore.showSuccess(t("admin.settings.settingsSaved"));
     }
   } catch (error: unknown) {
+    if (settingsSaved) {
+      appStore.showError(`${localText("普通设置已保存，但打票间隔或其他附加设置保存失败：", "Settings saved, but a separate setting failed: ")}${extractApiErrorMessage(error, t("admin.settings.failedToSave"))}`);
+      return;
+    }
     // 用户取消 step-up 验证：静默返回，不弹错误
     if (isStepUpCancelled(error)) {
       return;
@@ -13351,6 +13571,21 @@ watch(
 .default-sub-delete-btn {
   @apply h-[42px];
 }
+
+.settings-save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  margin: 0 -0.25rem;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  border: 1px solid rgb(226 232 240 / 0.85);
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 0.94);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 -8px 24px rgb(15 23 42 / 0.06);
+}
+
+:global(.dark) .settings-save-bar { background: rgb(30 41 59 / 0.94); border-color: rgb(71 85 105 / 0.7); }
 
 /* ============ 系统设置 Tab 导航 ============ */
 .settings-tabs-shell {

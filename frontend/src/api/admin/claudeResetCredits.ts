@@ -41,7 +41,8 @@ export interface ClaudeResetOutcome {
 // identifies one operator confirmation and must be reused when retrying it.
 export async function redeemClaudeResetCredit(id: number, idempotencyKey: string): Promise<ClaudeResetOutcome> {
   const { data } = await apiClient.post<ClaudeResetOutcome>(`/admin/accounts/${id}/claude/reset-credits/redeem`, undefined, {
-    headers: { 'Idempotency-Key': idempotencyKey }
+    headers: { 'Idempotency-Key': idempotencyKey },
+    timeout: 90_000
   })
   return data
 }

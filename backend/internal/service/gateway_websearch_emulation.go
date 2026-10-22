@@ -52,6 +52,9 @@ func getWebSearchManager() *websearch.Manager {
 // Judgment chain: manager exists → only web_search tool → global enabled → account/channel enabled.
 // Account-level mode: "enabled" (force on), "disabled" (force off), "default" (follow channel).
 func (s *GatewayService) shouldEmulateWebSearch(ctx context.Context, account *Account, groupID *int64, body []byte) bool {
+	if account == nil || account.Platform != PlatformAnthropic {
+		return false
+	}
 	return shouldEmulateWebSearchFor(ctx, s.settingService, s.channelService, account, groupID, body)
 }
 

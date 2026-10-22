@@ -47,7 +47,8 @@ type Account struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
-	Schedulable bool
+	Schedulable               bool
+	SchedulerTicketProjection bool `json:"-"`
 
 	RateLimitedAt    *time.Time
 	RateLimitResetAt *time.Time
@@ -190,6 +191,12 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	if a.IsOpenAIBPS() {
+		state := a.OpenAIBPSCredentialState(time.Now())
+		if state.Status == "expired" || state.Status == "revoked" || state.Status == "auth_failed" {
+			return false
+		}
+	}
 	if !a.IsActive() || !a.Schedulable || a.IsReasoningExcluded() {
 		return false
 	}
@@ -1865,6 +1872,9 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if !a.IsOpenAICompatible() {
 		return false
 	}
+	if a.Platform == PlatformOpenAIBPS {
+		return capability == OpenAIEndpointCapabilityResponses
+	}
 	if a.IsGrok() {
 		switch capability {
 		case OpenAIEndpointCapabilityChatCompletions:
@@ -2310,6 +2320,34 @@ func (a *Account) IsOpenAIResponsesFlattenNamespacesEnabled() bool {
 	return ok && enabled
 }
 
+// IsCancelUpstreamOnClientDisconnectEnabled 返回账号级"客户端断开即取消上游"开关。
+// 字段：accounts.extra.cancel_upstream_on_client_disconnect，缺省 false。
+//
+// 默认上游请求与客户端连接脱钩（detachUpstreamContext），让按量计费的上游在
+// 客户端断开后仍跑完并结算用量。按算力付费的自建推理上游应打开：断开的请求
+// 立刻取消，不再为无人接收的响应占用 GPU（一个 15 万 token 的轮次可长达数分钟）。
+func (a *Account) IsCancelUpstreamOnClientDisconnectEnabled() bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra["cancel_upstream_on_client_disconnect"].(bool)
+	return ok && enabled
+}
+
+// IsResponsesNonstreamKeepaliveEnabled 返回账号级"非流式 Responses 空白心跳"开关。
+// 字段：accounts.extra.responses_nonstream_keepalive，缺省 false。
+//
+// 打开后非流式 /v1/responses 在等待上游期间定期写出 JSON 前导空白，防止
+// Cloudflare 等代理的 100 秒首字节超时掐断长请求。首拍之后状态码固化为 200，
+// 后续错误以 JSON 错误体返回，且不再换号，因此只应对慢速自建上游打开。
+func (a *Account) IsResponsesNonstreamKeepaliveEnabled() bool {
+	if a == nil || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra["responses_nonstream_keepalive"].(bool)
+	return ok && enabled
+}
+
 // IsOpenAIWSAllowStoreRecoveryEnabled 返回账号级 store 恢复开关。
 // 字段：accounts.extra.openai_ws_allow_store_recovery。
 func (a *Account) IsOpenAIWSAllowStoreRecoveryEnabled() bool {
@@ -2347,10 +2385,10 @@ const (
 // 三态：default（跟随渠道）/ enabled（强制开启）/ disabled（强制关闭）。
 // 兼容旧 bool 值：true→enabled, false→default（并记录 debug 日志）。
 func (a *Account) GetWebSearchEmulationMode() string {
-	// OpenAI API Key accounts reach this via /v1/messages; their upstreams
-	// (DeepSeek etc. over Chat Completions) have no web_search tool.
-	if a == nil || a.Type != AccountTypeAPIKey || a.Extra == nil ||
-		(a.Platform != PlatformAnthropic && a.Platform != PlatformOpenAI) {
+	if a == nil || a.Type != AccountTypeAPIKey || a.Extra == nil {
+		return WebSearchModeDefault
+	}
+	if !a.IsOpenAICompatible() && a.Platform != PlatformAnthropic && a.Platform != PlatformAntigravity {
 		return WebSearchModeDefault
 	}
 	raw := a.Extra[featureKeyWebSearchEmulation]
@@ -2480,8 +2518,8 @@ func (a *Account) GetUserMsgQueueMode() string {
 
 // IsSessionIDMaskingEnabled 检查是否启用会话ID伪装
 // 仅适用于 Anthropic OAuth/SetupToken 类型账号
-// 启用后将在一段时间内（15分钟）固定 metadata.user_id 中的 session ID，
-// 使上游认为请求来自同一个会话
+// 启用后按账号命名空间重映射会话 ID，保留独立会话与父子关联；
+// 账号连续15分钟无请求后更新命名空间。
 func (a *Account) IsSessionIDMaskingEnabled() bool {
 	if !a.IsAnthropicOAuthOrSetupToken() {
 		return false

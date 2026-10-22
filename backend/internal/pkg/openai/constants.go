@@ -81,11 +81,23 @@ var instructionsGPT55 string
 //go:embed instructions_gpt6_astra.txt
 var instructionsGPT6Astra string
 
-// CodexGPT61SolMetadata is the complete official descriptor from openai/codex
+// CodexGPT61SolMetadata is the official openai/codex descriptor at
 // b1e72963c3b71a9265a551e54beff078384efed9, codex-rs/models-manager/models.json.
 //
 //go:embed codex_gpt61_sol.json
 var CodexGPT61SolMetadata []byte
+
+var instructionsGPT61Sol = func() string {
+	var descriptor struct {
+		ModelMessages struct {
+			InstructionsTemplate string `json:"instructions_template"`
+		} `json:"model_messages"`
+	}
+	if err := json.Unmarshal(CodexGPT61SolMetadata, &descriptor); err != nil {
+		panic(err)
+	}
+	return descriptor.ModelMessages.InstructionsTemplate
+}()
 
 // latestCodexInstructions 返回当前已知最新版本的 Codex base instructions，
 // 当前为 GPT-5.5；若 5.5 prompt 意外为空则回退到 DefaultInstructions 保证非空。
@@ -150,15 +162,7 @@ func CodexBaseInstructionsForModel(model string) string {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	switch {
 	case IsGPT61SolModelSpelling(canonical):
-		var metadata struct {
-			ModelMessages struct {
-				InstructionsTemplate string `json:"instructions_template"`
-			} `json:"model_messages"`
-		}
-		if err := json.Unmarshal(CodexGPT61SolMetadata, &metadata); err != nil {
-			panic(err)
-		}
-		return metadata.ModelMessages.InstructionsTemplate
+		return instructionsGPT61Sol
 	case canonical == "gpt-6" || canonical == "gpt-6-astra" || strings.HasPrefix(canonical, "gpt-6-astra-"):
 		if v := strings.TrimSpace(instructionsGPT6Astra); v != "" {
 			return instructionsGPT6Astra
@@ -197,14 +201,14 @@ func IsGPT6SolOrLunaModelSpelling(model string) bool {
 	return false
 }
 
-// IsGPT61SolModelSpelling recognizes the published model and local effort/compact
-// spellings. Invalid effort suffixes remain identifiable for request validation.
+// IsGPT61SolModelSpelling recognizes the GPT-6.1 Sol ID and local effort/compact suffixes.
 func IsGPT61SolModelSpelling(model string) bool {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
-	if canonical == "gpt-6.1-sol" {
+	const base = "gpt-6.1-sol"
+	if canonical == base {
 		return true
 	}
-	suffix, ok := strings.CutPrefix(canonical, "gpt-6.1-sol-")
+	suffix, ok := strings.CutPrefix(canonical, base+"-")
 	if !ok {
 		return false
 	}
@@ -216,8 +220,13 @@ func IsGPT61SolModelSpelling(model string) bool {
 	}
 }
 
-// ValidateGPT61SolReasoningEffort rejects disabled reasoning instead of silently
-// increasing the client's requested effort on compatibility paths.
+// IsGPT6SolFamilyModelSpelling covers GPT-6 Sol/Luna and GPT-6.1 Sol variants.
+func IsGPT6SolFamilyModelSpelling(model string) bool {
+	return IsGPT6SolOrLunaModelSpelling(model) || IsGPT61SolModelSpelling(model)
+}
+
+// ValidateGPT61SolReasoningEffort rejects disabled reasoning without silently
+// increasing the client's requested effort.
 func ValidateGPT61SolReasoningEffort(model, effort string) error {
 	if IsGPT61SolModelSpelling(model) {
 		switch strings.ToLower(strings.TrimSpace(effort)) {

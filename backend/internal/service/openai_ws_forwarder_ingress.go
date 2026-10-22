@@ -263,12 +263,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 		requestedReasoningEffort := CanonicalRequestedReasoningEffort(normalized, strings.TrimSpace(values[1].String()))
+		normalized = normalizeOpenAIRequestLocale(ctx, account, normalized, "ws")
 		if next, policyErr := applyOpenAIWSReasoningEffortPolicy(normalized, hooks); policyErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 		} else {
 			normalized = next
 		}
 		responsesLite := isOpenAIResponsesLiteWebSocketPayload(normalized)
+		reasoningBeforeCompatibility := gjson.GetBytes(normalized, "reasoning")
 		if compatibilityBody, compatibilityChanged, compatibilityErr := normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(s.cfg, normalized, account, responsesLite); compatibilityErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", compatibilityErr)
 		} else if compatibilityChanged {
@@ -312,7 +314,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
-		if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turnMetadata != "" {
+		if turnMetadata := strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)); turnMetadata != "" &&
+			(!account.IsOpenAIOAuthLike() || (turn == 1 && !gjson.GetBytes(normalized, "client_metadata."+openAIWSTurnMetadataHeader).Exists())) {
 			next, setErr := applyPayloadMutation(normalized, "client_metadata."+openAIWSTurnMetadataHeader, turnMetadata)
 			if setErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
@@ -326,6 +329,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		if accountScoped {
 			normalized = accountScopedPayload
+		}
+		if account.IsOpenAIOAuthLike() {
+			ids := resolveCodexFingerprintIDsForCaller(account, c.Request.Header, getAPIKeyIDFromContext(c))
+			fingerprintBody, _, fingerprintErr := applyCodexFingerprintClientMetadataRaw(normalized, ids)
+			if fingerprintErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", fingerprintErr)
+			}
+			stageCodexFingerprintIDs(c, ids)
+			metadataBody, _, metadataErr := normalizeCodexRequestMetadata(fingerprintBody, nil, account, false)
+			if metadataErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", metadataErr)
+			}
+			normalized = metadataBody
 		}
 		if responsesLite {
 			litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(normalized, account)
@@ -388,7 +404,23 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				requestModel = mappedModel
 			}
 		}
-		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
+		mappedUpstreamModel := account.GetMappedModel(requestModel)
+		upstreamModel := normalizeOpenAIModelForUpstream(account, mappedUpstreamModel)
+		if err := validateGPT61SolCompatRequest(trimmed, upstreamModel, mappedUpstreamModel); err != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+		}
+		if openai.IsGPT61SolModelSpelling(upstreamModel) && reasoningBeforeCompatibility.Exists() && gjson.GetBytes(normalized, "reasoning").Raw != reasoningBeforeCompatibility.Raw {
+			next, err := sjson.SetRawBytes(normalized, "reasoning", []byte(reasoningBeforeCompatibility.Raw))
+			if err != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+			}
+			normalized = next
+		}
+		if next, _, err := normalizeGPT61SolResponsesRequest(normalized, upstreamModel, requestModel, mappedUpstreamModel); err != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+		} else {
+			normalized = next
+		}
 		if modelMissing || upstreamModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
 			if setErr != nil {
@@ -544,7 +576,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			// inherit another connection's native WS turn state or socket binding.
 			return
 		}
-		if turnState == "" && stateStore != nil && sessionHash != "" {
+		if !account.IsOpenAIOAuthLike() && turnState == "" && stateStore != nil && sessionHash != "" {
 			if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
 				turnState = savedTurnState
 			}
@@ -556,7 +588,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 
-		if stateStore != nil && storeDisabled && payload.previousResponseID == "" && sessionHash != "" {
+		if stateStore != nil && payload.previousResponseID == "" && sessionHash != "" {
 			if connID, ok := stateStore.GetSessionConn(groupID, sessionHash); ok {
 				preferredConnID = connID
 			}
@@ -772,7 +804,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	firstRoutingFields := gjson.GetManyBytes(firstPayload.payloadRaw, "model", "service_tier")
-	wsHeaders, _, buildHdrErr := s.buildOpenAIWSHeaders(
+	wsHeaders, _, ticket, buildHdrErr := s.buildOpenAIWSHeadersWithTicket(
 		ctx,
 		c,
 		account,
@@ -788,12 +820,23 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	if metadataBody, metadataChanged, metadataErr := normalizeCodexRequestMetadata(firstPayload.payloadRaw, wsHeaders, account, false); metadataErr != nil {
+		return fmt.Errorf("normalize websocket handshake metadata: %w", metadataErr)
+	} else if metadataChanged {
+		firstPayload.payloadRaw = metadataBody
+		firstPayload.payloadBytes = len(metadataBody)
+	}
+	// 归一化按旧习惯重写 session_id / x-codex-installation-id 头，握手前重新收口。
+	if account.UsesOpenAICodexProtocol() {
+		projectCodexOutboundHeaders(wsHeaders, true)
+	}
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		Account:          account,
+		WSURL:            wsURL,
+		Headers:          wsHeaders,
+		ObserveHandshake: s.codexTicketHandshakeObserver(ctx, ticket),
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
-			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
+			return s.refreshOpenAIWSAuthHeaders(factoryCtx, account, headers)
 		},
 		ProxyURL: func() string {
 			if account.ProxyID != nil && account.Proxy != nil {
@@ -868,7 +911,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// 上游读写失败后的重试同样新建，避免再拿到同批陈旧的空闲连接。
 		req.ForceNewConn = dedicatedMode || forceNewConn
 		acquireCtx, acquireCancel := context.WithTimeout(ctx, acquireTimeout)
-		lease, acquireErr := pool.Acquire(acquireCtx, req)
+		lease, acquireErr := s.acquireOpenAIWSWithAuthRecovery(acquireCtx, pool, &req)
+		baseAcquireReq.Headers = req.Headers
 		acquireCancel()
 		var dialErr *openAIWSDialError
 		if acquireErr != nil && s.isAgentIdentityAccount(ctx, account) && errors.As(acquireErr, &dialErr) && isAgentIdentityTaskInvalidWSDialError(dialErr) && !agentTaskRecoveryTried {
@@ -1883,7 +1927,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
 			stateStore.BindResponseConn(responseID, connID, ttl)
 		}
-		if stateStore != nil && storeDisabled && sessionHash != "" {
+		if stateStore != nil && sessionHash != "" {
 			stateStore.BindSessionConn(groupID, sessionHash, connID, s.openAIWSSessionStickyTTL())
 		}
 		if connID != "" {
@@ -1917,7 +1961,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if nextPayload.promptCacheKey != "" {
 			// ingress 会话在整个客户端 WS 生命周期内复用同一上游连接；
 			// prompt_cache_key 对握手头的更新仅在未来需要重新建连时生效。
-			updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeaders(
+			updatedHeaders, _, updatedTicket, updHdrErr := s.buildOpenAIWSHeadersWithTicket(
 				ctx,
 				c,
 				account,
@@ -1934,6 +1978,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				logOpenAIWSModeInfo("ingress_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
 			} else {
 				baseAcquireReq.Headers = updatedHeaders
+				baseAcquireReq.ObserveHandshake = s.codexTicketHandshakeObserver(ctx, updatedTicket)
 			}
 		}
 		setOpenAICodexRoutingHint(baseAcquireReq.Headers, account, nextRoutingFields[0].String(), nextRoutingFields[1].String())

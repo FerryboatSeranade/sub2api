@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -165,9 +166,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// derive a stable seed from the final upstream model family.
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
-	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
+	if err := validateGPT61SolCompatRequest(body, upstreamModel, billingModel); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
+	}
+	if openai.IsGPT61SolModelSpelling(upstreamModel) && chatReq.ReasoningEffort == "" {
+		chatReq.ReasoningEffort = deriveOpenAIReasoningEffortFromModelCandidates([]string{originalModel, billingModel})
 	}
 
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
@@ -199,6 +203,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		err           error
 	)
 	if isResponsesShape {
+		body, _, err = normalizeGPT61SolResponsesRequest(body, billingModel)
+		if err != nil {
+			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return nil, err
+		}
 		responsesBody, err = sjson.SetBytes(body, "model", upstreamModel)
 		if err != nil {
 			return nil, fmt.Errorf("rewrite model in responses-shape body: %w", err)

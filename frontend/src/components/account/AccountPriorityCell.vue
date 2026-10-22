@@ -12,7 +12,7 @@
       type="button"
       class="flex h-full w-6 items-center justify-center rounded-l-lg text-gray-500 opacity-0 transition hover:bg-gray-200/70 hover:text-primary-600 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent disabled:hover:text-gray-300 dark:disabled:text-dark-600 dark:disabled:hover:text-dark-600 group-hover/priority:opacity-100 group-focus-within/priority:opacity-100 dark:text-gray-400 dark:hover:bg-dark-600 dark:hover:text-primary-400 [@media(hover:none)]:opacity-100"
       :class="{ '!opacity-100': editing || dirty }"
-      :disabled="saving || draft <= MIN_PRIORITY"
+      :disabled="saving"
       :title="t('admin.accounts.priorityQuick.raise')"
       :aria-label="t('admin.accounts.priorityQuick.raise')"
       data-testid="account-priority-decrement"
@@ -60,7 +60,7 @@
       type="button"
       class="flex h-full w-6 items-center justify-center rounded-r-lg text-gray-500 opacity-0 transition hover:bg-gray-200/70 hover:text-primary-600 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent disabled:hover:text-gray-300 dark:disabled:text-dark-600 dark:disabled:hover:text-dark-600 group-hover/priority:opacity-100 group-focus-within/priority:opacity-100 dark:text-gray-400 dark:hover:bg-dark-600 dark:hover:text-primary-400 [@media(hover:none)]:opacity-100"
       :class="{ '!opacity-100': editing || dirty }"
-      :disabled="saving || draft >= MAX_PRIORITY"
+      :disabled="saving"
       :title="t('admin.accounts.priorityQuick.lower')"
       :aria-label="t('admin.accounts.priorityQuick.lower')"
       data-testid="account-priority-increment"
@@ -80,8 +80,6 @@ import { update as updateAccount } from '@/api/admin/accounts'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import type { Account } from '@/types'
 
-const MIN_PRIORITY = 1
-const MAX_PRIORITY = 9999
 // 连续点击时合并为一次保存，避免每次 +/- 都打一次接口
 const SAVE_DEBOUNCE_MS = 450
 
@@ -109,7 +107,6 @@ watch(
   }
 )
 
-const clamp = (value: number) => Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.round(value)))
 
 const clearTimer = () => {
   if (saveTimer) {
@@ -141,7 +138,7 @@ const scheduleSave = () => {
 
 const step = (delta: number) => {
   if (saving.value) return
-  const next = clamp(draft.value + delta)
+  const next = draft.value + delta
   if (next === draft.value) return
   draft.value = next
   scheduleSave()
@@ -159,14 +156,14 @@ const startEditing = async () => {
 
 const nudgeInput = (delta: number) => {
   const current = Number.parseInt(inputValue.value, 10)
-  inputValue.value = String(clamp((Number.isFinite(current) ? current : draft.value) + delta))
+  inputValue.value = String((Number.isFinite(current) ? current : draft.value) + delta)
 }
 
 const commitInput = () => {
   if (!editing.value) return
   editing.value = false
   const parsed = Number.parseInt(inputValue.value.trim(), 10)
-  if (Number.isFinite(parsed)) draft.value = clamp(parsed)
+  if (Number.isFinite(parsed)) draft.value = parsed
   void save()
 }
 

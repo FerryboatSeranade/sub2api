@@ -688,6 +688,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
+	firstClientMessage = normalizeOpenAIRequestLocale(ctx, account, firstClientMessage, "ws")
 	if isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
@@ -768,6 +769,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if accountScoped {
 		firstClientMessage = accountScopedFirst
 	}
+	if account.IsOpenAIOAuthLike() {
+		ids := resolveCodexFingerprintIDsForCaller(account, c.Request.Header, getAPIKeyIDFromContext(c))
+		fingerprintBody, _, fingerprintErr := applyCodexFingerprintClientMetadataRaw(firstClientMessage, ids)
+		if fingerprintErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", fingerprintErr)
+		}
+		firstClientMessage = fingerprintBody
+		stageCodexFingerprintIDs(c, ids)
+	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
@@ -840,7 +850,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
-	headers, _, buildHdrErr := s.buildOpenAIWSHeaders(
+	headers, _, ticket, buildHdrErr := s.buildOpenAIWSHeadersWithTicket(
 		ctx,
 		c,
 		account,
@@ -856,6 +866,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	if metadataBody, metadataChanged, metadataErr := normalizeCodexRequestMetadata(firstClientMessage, headers, account, false); metadataErr != nil {
+		return fmt.Errorf("normalize websocket handshake metadata: %w", metadataErr)
+	} else if metadataChanged {
+		firstClientMessage = metadataBody
+	}
+	// 归一化按旧习惯重写 session_id / x-codex-installation-id 头，握手前重新收口。
+	if account.UsesOpenAICodexProtocol() {
+		projectCodexOutboundHeaders(headers, true)
+	}
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
@@ -866,18 +885,25 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return errors.New("openai ws passthrough dialer is nil")
 	}
 
+	observeHandshake := s.codexTicketHandshakeObserver(ctx, ticket)
 	agentTaskRecoveryTried := false
+	oauthRecoveryTried := false
+	var oauthCredentialOwner *Account
 	var upstreamConn openAIWSClientConn
 	statusCode := 0
 	var handshakeHeaders http.Header
 	for {
-		headers, err = s.refreshOpenAIAgentIdentityHeaders(ctx, account, headers)
+		headers, err = s.refreshOpenAIWSAuthHeaders(ctx, account, headers)
 		if err != nil {
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
+		sentHeaders := cloneHeader(headers)
 		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(dialCtx, wsURL, headers, proxyURL)
 		cancelDial()
+		if observeHandshake != nil {
+			observeHandshake(sentHeaders, statusCode, handshakeHeaders)
+		}
 		if err == nil {
 			break
 		}
@@ -893,6 +919,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				return fmt.Errorf("agent identity task recovery failed: %w", recoveryErr)
 			}
 			continue
+		}
+		if statusCode == http.StatusUnauthorized {
+			if !oauthRecoveryTried {
+				oauthRecoveryTried = true
+				var recovered bool
+				headers, oauthCredentialOwner, recovered = s.recoverOpenAIOAuthHeaders(ctx, account, sentHeaders)
+				if recovered {
+					continue
+				}
+			} else if oauthCredentialOwner != nil && s.openAITokenProvider != nil {
+				s.openAITokenProvider.RecordUnauthorizedAfterRefresh(ctx, oauthCredentialOwner, strings.TrimPrefix(sentHeaders.Get("Authorization"), "Bearer "))
+			}
 		}
 		logOpenAIWSV2Passthrough(
 			"relay_dial_failed account_id=%d status_code=%d err=%s",
@@ -998,6 +1036,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
 			if isResponseCreate {
+				payload = normalizeOpenAIRequestLocale(ctx, account, payload, "ws")
 				if normalized, compatibilityChanged, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(s.cfg, payload, account, responsesLite); normalizeErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
 				} else if compatibilityChanged {
@@ -1024,6 +1063,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			}
 			if isResponseCreate {
+				if account.IsOpenAIOAuthLike() {
+					ids := resolveCodexFingerprintIDsForCaller(account, c.Request.Header, getAPIKeyIDFromContext(c))
+					fingerprintBody, _, fingerprintErr := applyCodexFingerprintClientMetadataRaw(payload, ids)
+					if fingerprintErr != nil {
+						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", fingerprintErr)
+					}
+					metadataBody, _, metadataErr := normalizeCodexRequestMetadata(fingerprintBody, nil, account, false)
+					if metadataErr != nil {
+						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", metadataErr)
+					}
+					payload = metadataBody
+				}
 				if responsesLite {
 					litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(payload, account)
 					if liteErr != nil {
@@ -1118,6 +1169,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				acceptedTurnStartedAt.Store(&responseCreateAtCopy)
 				acceptedTurn = true
 			}
+			if hooks != nil && hooks.ObserveFrame != nil {
+				hooks.ObserveFrame("client", 0, out)
+			}
 			return out, blocked, policyErr
 		},
 		onBlock: func(blocked *OpenAIFastBlockedError) {
@@ -1144,6 +1198,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			fmt.Errorf("write first upstream websocket request: %w", firstWriteErr),
 			false,
 		)
+	}
+	if hooks != nil && hooks.ObserveFrame != nil {
+		hooks.ObserveFrame("client", 0, firstClientMessage)
 	}
 	upstreamFirstMessageSent = true
 
@@ -1255,6 +1312,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if msgType == coderws.MessageText && writeErr == nil {
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 					markOpenAIWSClientVisibleFailure(c, eventType, payload)
+				}
+				if writeErr == nil && hooks != nil && hooks.ObserveFrame != nil {
+					hooks.ObserveFrame("server", int(completedTurns.Load())+1, payload)
 				}
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)

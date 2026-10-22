@@ -1,7 +1,12 @@
 <template>
   <div class="flex items-center gap-2">
+    <div v-if="bpsCredentialFailed" class="flex flex-col gap-1">
+      <BPSCredentialStatus :state="bpsCredentialState" :show-expiry="false" />
+      <span v-if="account.status !== 'active' && account.status !== 'error'" class="badge badge-gray text-xs">{{ t(`admin.accounts.status.${account.status}`) }}</span>
+      <span v-if="account.schedulable === false" class="text-[11px] text-gray-500">{{ t('admin.accounts.status.paused') }}</span>
+    </div>
     <!-- Rate Limit Display (429) - Two-line layout -->
-    <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
+    <div v-else-if="isRateLimited" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
       <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
     </div>
@@ -23,6 +28,13 @@
         >
           {{ statusText }}
         </button>
+        <span
+          v-for="(result, index) in autoDegradationProbeResults"
+          :key="index"
+          class="max-w-[180px] break-all text-center text-[11px] leading-4 text-gray-500 dark:text-gray-400"
+        >
+          {{ result }}
+        </span>
         <span class="max-w-[180px] text-center text-[11px] leading-4 text-gray-500 dark:text-gray-400">
           {{ tempUnschedRecoveryText }}
         </span>
@@ -32,6 +44,7 @@
       </span>
     </template>
 
+    <p v-if="bpsCredentialState?.requires_manual_resume && !bpsCredentialFailed" class="max-w-[180px] text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.bps.manualResume') }}</p>
     <!-- Error Info Indicator -->
     <div v-if="hasError && account.error_message" class="group/error relative">
       <svg
@@ -160,6 +173,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import BPSCredentialStatus from './BPSCredentialStatus.vue'
+import { useBPSCredentialState } from '@/composables/useBPSCredentialState'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Account } from '@/types'
@@ -174,6 +189,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
+
+const { state: bpsCredentialState, failed: bpsCredentialFailed } = useBPSCredentialState(() => props.account)
 
 // Computed: is rate limited (429)
 const isRateLimited = computed(() => {
@@ -277,6 +294,28 @@ const isOverloaded = computed(() => {
 const isTempUnschedulable = computed(() => {
   if (!props.account.temp_unschedulable_until) return false
   return new Date(props.account.temp_unschedulable_until) > new Date()
+})
+
+const autoDegradationProbeResults = computed<string[]>(() => {
+  if (!isTempUnschedulable.value || !props.account.temp_unschedulable_reason) return []
+
+  try {
+    const reason: unknown = JSON.parse(props.account.temp_unschedulable_reason)
+    if (!reason || typeof reason !== 'object' || Array.isArray(reason)) return []
+
+    const payload = reason as Record<string, unknown>
+    if (payload.source !== 'auto_degradation_check' || !Array.isArray(payload.probe_results)) return []
+
+    return payload.probe_results.flatMap((entry: unknown) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+      const probe = entry as Record<string, unknown>
+      const model = typeof probe.model === 'string' ? probe.model.trim() : ''
+      const predictedModel = typeof probe.predicted_model === 'string' ? probe.predicted_model.trim() : ''
+      return model && predictedModel ? [`${model} → ${predictedModel}`] : []
+    })
+  } catch {
+    return []
+  }
 })
 
 // Computed: has error status

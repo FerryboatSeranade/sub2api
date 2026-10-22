@@ -185,9 +185,7 @@ import {
   MAX_RECHARGE_BONUS_TIERS,
   describeRechargeBonusIntervals,
   formatRechargeBonusNumber,
-  isDuplicateRechargeBonusMinAmount,
-  isRechargeBonusMinAmountValid,
-  isRechargeBonusPercentValidForMode,
+  getRechargeBonusTierDraftError,
   normalizeRechargeBonusMode,
   sanitizeRechargeBonusTiersForSubmit,
   type RechargeBonusInterval,
@@ -258,19 +256,8 @@ function onPercentInput(index: number, event: Event) {
   emit('update:modelValue', next)
 }
 
-type RowError = '' | 'invalidMinAmount' | 'invalidPercent' | 'invalidDiscountPercent' | 'duplicateMinAmount'
-
-function rowError(index: number): RowError {
-  const tier = tiers.value[index]
-  if (!tier) return ''
-  if (tier.min_amount !== null && !isRechargeBonusMinAmountValid(tier.min_amount)) return 'invalidMinAmount'
-  if (tier.bonus_percent !== null && !isRechargeBonusPercentValidForMode(tier.bonus_percent, currentMode.value)) {
-    return currentMode.value === 'discount' && isRechargeBonusPercentValidForMode(tier.bonus_percent, 'bonus')
-      ? 'invalidDiscountPercent'
-      : 'invalidPercent'
-  }
-  if (isDuplicateRechargeBonusMinAmount(tiers.value, index)) return 'duplicateMinAmount'
-  return ''
+function rowError(index: number) {
+  return getRechargeBonusTierDraftError(tiers.value, index, currentMode.value)
 }
 
 function rowIncomplete(index: number): boolean {

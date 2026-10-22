@@ -2046,15 +2046,30 @@ func TestMessageStartSSE_StopReasonIsJSONNull(t *testing.T) {
 	require.NotContains(t, sse, `"stop_reason":""`)
 }
 
-func TestGPT61SolCacheOptionsAndBreakpointsSurviveChatBridge(t *testing.T) {
+func TestGPT61SolConversionPreservesEffortWithoutSampling(t *testing.T) {
 	sampling := 0.7
 	for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
-		out, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: "gpt-6.1-sol", ReasoningEffort: effort, Temperature: &sampling, TopP: &sampling, PromptCacheOptions: json.RawMessage(`{"ttl":"30m","mode":"explicit"}`), Messages: []ChatMessage{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"prefix","prompt_cache_breakpoint":{"mode":"explicit"}}]`)}}})
+		chat, err := ChatCompletionsToResponses(&ChatCompletionsRequest{
+			Model: "gpt-6.1-sol", ReasoningEffort: effort, Temperature: &sampling, TopP: &sampling,
+			PromptCacheOptions: json.RawMessage(`{"ttl":"30m","mode":"explicit"}`),
+			Messages:           []ChatMessage{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello","prompt_cache_breakpoint":{"mode":"explicit"}}]`)}},
+		})
 		require.NoError(t, err)
-		require.Nil(t, out.Temperature)
-		require.Nil(t, out.TopP)
-		require.Equal(t, effort, out.Reasoning.Effort)
-		require.JSONEq(t, `{"ttl":"30m","mode":"explicit"}`, string(out.PromptCacheOptions))
-		require.Contains(t, string(out.Input), "prompt_cache_breakpoint")
+		require.Equal(t, effort, chat.Reasoning.Effort)
+		require.Nil(t, chat.Temperature)
+		require.Nil(t, chat.TopP)
+		require.JSONEq(t, `{"ttl":"30m","mode":"explicit"}`, string(chat.PromptCacheOptions))
+		require.Contains(t, string(chat.Input), "prompt_cache_breakpoint")
+		messages, err := AnthropicToResponses(&AnthropicRequest{Model: "gpt-6.1-sol", OutputConfig: &AnthropicOutputConfig{Effort: effort}, Temperature: &sampling, TopP: &sampling})
+		require.NoError(t, err)
+		require.Equal(t, effort, messages.Reasoning.Effort)
+		require.Nil(t, messages.Temperature)
+		require.Nil(t, messages.TopP)
+	}
+	for _, effort := range []string{"none", "minimal"} {
+		_, err := ChatCompletionsToResponses(&ChatCompletionsRequest{Model: "gpt-6.1-sol", ReasoningEffort: effort})
+		require.ErrorContains(t, err, "does not support reasoning effort")
+		_, err = AnthropicToResponses(&AnthropicRequest{Model: "gpt-6.1-sol", OutputConfig: &AnthropicOutputConfig{Effort: effort}})
+		require.ErrorContains(t, err, "does not support reasoning effort")
 	}
 }

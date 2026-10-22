@@ -138,6 +138,7 @@ describe('AccountUsageCell', () => {
           id: type === 'oauth' ? 9701 : 9702,
           platform: 'openai',
           type,
+          codex_ticket_latest_event: { model: 'gpt-6-astra', kind: 'success', occurred_at: '2026-09-23T12:00:00Z' },
           codex_turn_tickets: [
             { model: 'gpt-6-astra', ready: true, remaining_seconds: 2520, blocked: false },
             { model: 'gpt-5.6-sol', ready: false, remaining_seconds: 0, blocked: true },

@@ -50,8 +50,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		// Privacy client factory for OpenAI training opt-out
 		providePrivacyClientFactory,
 
-		// BuildInfo provider
-		provideServiceBuildInfo,
 		providePluginHostInfo,
 
 		// Cleanup function provider
@@ -65,13 +63,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 
 func providePrivacyClientFactory() service.PrivacyClientFactory {
 	return repository.CreatePrivacyReqClient
-}
-
-func provideServiceBuildInfo(buildInfo handler.BuildInfo) service.BuildInfo {
-	return service.BuildInfo{
-		Version:   buildInfo.Version,
-		BuildType: buildInfo.BuildType,
-	}
 }
 
 func providePluginHostInfo(buildInfo handler.BuildInfo) service.PluginHostInfo {
@@ -125,9 +116,11 @@ func provideCleanup(
 	channelMonitorV2Aggregator *service.ChannelMonitorV2Aggregator,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
+	codexAutoDegradationCheck *service.CodexAutoDegradationCheckService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	auditLog *service.AuditLogService,
+	userRequestAudit *service.UserRequestAuditService,
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
@@ -206,6 +199,12 @@ func provideCleanup(
 			{"AuditLogService", func() error {
 				if auditLog != nil {
 					auditLog.Stop()
+				}
+				return nil
+			}},
+			{"UserRequestAuditService", func() error {
+				if userRequestAudit != nil {
+					userRequestAudit.Stop()
 				}
 				return nil
 			}},
@@ -390,6 +389,12 @@ func provideCleanup(
 			{"UpstreamBillingProbeService", func() error {
 				if upstreamBillingProbe != nil {
 					upstreamBillingProbe.Stop()
+				}
+				return nil
+			}},
+			{"CodexAutoDegradationCheckService", func() error {
+				if codexAutoDegradationCheck != nil {
+					codexAutoDegradationCheck.Stop()
 				}
 				return nil
 			}},

@@ -33,15 +33,13 @@ const (
 	// OpenAI Platform API for API Key accounts (fallback)
 	openaiPlatformAPIURL            = "https://api.openai.com/v1/responses"
 	openaiPlatformAPIInputTokensURL = "https://api.openai.com/v1/responses/input_tokens"
-	openaiStickySessionTTL          = time.Hour // 粘性会话TTL
-	// 与真实 Codex TUI 的 User-Agent 结构对齐：
-	// {originator}/{version} ({OS} {OS_version}; {arch}) {terminal}
-	// 缺少 OS/架构/终端后缀的形态易被上游指纹识别为非官方客户端。
-	// 该后缀是 UA 形态的唯一定义处，buildCodexCLIUserAgent 按运行时版本号复用它。
-	codexCLIUserAgentSuffix = " (Ubuntu 22.4.0; x86_64) xterm-256color"
-	// codexCLIUserAgent 是编译期兜底 UA；运行时优先使用由后台版本号拼出的规范 UA。
-	// 版本段必须来自 codexCLIVersion：UA 与 version 头是同一个版本声明的两个出口，
-	// 各自硬编码会漂移成互相矛盾的身份。
+	openaiStickySessionTTL          = 5 * time.Minute // 粘性会话TTL
+	// Local Codex baseline observed on this Windows host:
+	// Windows 10.0.22621.1848 / AMD64 / TERM=dumb.
+	// Keep explicit administrator UA settings authoritative; this is the built-in fallback.
+	codexCLIUserAgentSuffix = " (Windows 10.0.22621.1848; x86_64) dumb"
+	// codexCLIUserAgent is the compile-time fallback UA; runtime settings can still
+	// provide a complete client fingerprint and the current version is rebuilt below.
 	codexCLIUserAgent = openai.CodexDefaultOriginator + "/" + codexCLIVersion + codexCLIUserAgentSuffix
 	// codex_cli_only 拒绝时单个请求头日志长度上限（字符）
 	codexCLIOnlyHeaderValueMaxBytes = 256
@@ -62,7 +60,8 @@ const (
 	// 陈旧版本会被优先丢弃（HTTP 200 + 流内 server_is_overloaded）；非官方客户端配不出
 	// 官方身份时整体回退到本常量，因此它必须跟随官方 CLI 的当前发布版本，
 	// 落后多个版本会让这些请求稳定落在被优先丢弃的一侧。
-	codexCLIVersion = "0.146.0"
+	// https://github.com/openai/codex/releases/tag/rust-v0.159.3
+	codexCLIVersion = "0.159.3"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 	// 配额自动暂停时，超过该时长仍未刷新的 used% 快照视为陈旧，不再据此暂停账号。
@@ -80,6 +79,10 @@ var openaiAllowedHeaders = map[string]bool{
 	"user-agent":              true,
 	"originator":              true,
 	"session_id":              true,
+	"session-id":              true,
+	"thread-id":               true,
+	"thread_id":               true,
+	"x-client-request-id":     true,
 	"x-codex-beta-features":   true,
 	"x-codex-installation-id": true,
 	"x-codex-turn-state":      true,
@@ -99,6 +102,10 @@ var openaiPassthroughAllowedHeaders = map[string]bool{
 	"user-agent":              true,
 	"originator":              true,
 	"session_id":              true,
+	"session-id":              true,
+	"thread-id":               true,
+	"thread_id":               true,
+	"x-client-request-id":     true,
 	"x-codex-beta-features":   true,
 	"x-codex-installation-id": true,
 	"x-codex-turn-state":      true,
@@ -297,6 +304,10 @@ type OpenAIForwardResult struct {
 	// AudioUsage carries Voice billing units when present.
 	AudioUsage *AudioUsage
 
+	// Internal model rounds retain their own pricing context. Summed prompt
+	// tokens must not turn several short rounds into one long-context request.
+	hostedSearchRounds           []*OpenAIForwardResult
+	hostedSearchRoundCosts       []*CostBreakdown
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
 	wsAccountFailoverReplayInput []json.RawMessage
@@ -306,7 +317,7 @@ type OpenAIForwardResult struct {
 // that may clear model-scoped transient state. The zero value remains a success
 // for existing non-WS callers.
 func (r *OpenAIForwardResult) SucceededForScheduling() bool {
-	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
+	if r == nil || (!r.OpenAIWSMode && r.UpstreamEndpoint != "/basispoints/api/responses") || r.UpstreamTerminalEvent == "" {
 		return true
 	}
 	switch r.UpstreamTerminalEvent {
@@ -511,10 +522,16 @@ type OpenAIGatewayService struct {
 	openaiCodexTurnStateWrites  atomic.Uint64
 	// openaiCodexTickets: accountID\x00model → *openAICodexTicket，292 长度门票。
 	openaiCodexTickets           sync.Map
+	openaiCodexTicketInFlight    sync.Map
+	openaiCodexTicketProxyTurns  sync.Map
+	openaiCodexTicketNextAttempt sync.Map
+	openaiCodexTicketHistory     CodexTicketAttemptRepository
+	openaiCodexTicketLifecycle   CodexTicketLifecycleRepository
 	openaiCodexTicketFlight      singleflight.Group
 	openaiCodexTicketLifecycleMu sync.Mutex
 	openaiCodexTicketCancel      context.CancelFunc
 	openaiCodexTicketDone        chan struct{}
+	openaiCodexTicketWake        chan struct{}
 	openaiCodexTicketStopped     bool
 }
 

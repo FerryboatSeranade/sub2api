@@ -63,14 +63,23 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 
 	billingModel := resolveOpenAIForwardModel(account, anthropicReq.Model, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
-	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
+	if err := validateGPT61SolCompatRequest(body, upstreamModel, billingModel); err != nil {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
-	if openai.IsGPT61SolModelSpelling(upstreamModel) && len(anthropicReq.Tools) > 0 {
-		err := fmt.Errorf("gpt-6.1-sol requires Responses for tool calls; this account only supports Chat Completions")
-		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		return nil, err
+	if openai.IsGPT61SolModelSpelling(upstreamModel) {
+		if len(anthropicReq.Tools) > 0 {
+			err := fmt.Errorf("gpt-6.1-sol requires Responses for tool calls; this account only supports Chat Completions")
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return nil, err
+		}
+		chatReq.Temperature = nil
+		chatReq.TopP = nil
+		if anthropicReq.OutputConfig == nil || anthropicReq.OutputConfig.Effort == "" {
+			if effort := deriveOpenAIReasoningEffortFromModelCandidates([]string{originalModel, billingModel}); effort != "" {
+				chatReq.ReasoningEffort = effort
+			}
+		}
 	}
 	chatReq.Model = upstreamModel
 	chatReq.ReasoningEffort = openAICompatAnthropicReasoningEffort(&anthropicReq, upstreamModel, chatReq.ReasoningEffort)

@@ -415,12 +415,15 @@ func userExistsForBilling(ctx context.Context, tx *sql.Tx, userID int64) (bool, 
 }
 
 func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {
+	// In-flight requests still owe their usage after the key is soft-deleted.
+	// Bill the retained row by ID, but never change a deleted key's status or
+	// report it as newly exhausted. Authentication must continue to exclude it.
 	var exhausted bool
 	err := tx.QueryRowContext(ctx, `
 		UPDATE api_keys
 		SET quota_used = quota_used + $1,
 			status = CASE
-				WHEN quota > 0
+				WHEN deleted_at IS NULL AND quota > 0
 					AND status = $3
 					AND quota_used < quota
 					AND quota_used + $1 >= quota
@@ -428,8 +431,8 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 				ELSE status
 			END,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
-		RETURNING quota > 0 AND quota_used >= quota AND quota_used - $1 < quota
+		WHERE id = $2
+		RETURNING deleted_at IS NULL AND quota > 0 AND quota_used >= quota AND quota_used - $1 < quota
 	`, amount, apiKeyID, service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted).Scan(&exhausted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, service.ErrAPIKeyNotFound
@@ -441,6 +444,8 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 }
 
 func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKeyID int64, cost float64) error {
+	// As with lifetime quota, deletion must not roll back an accepted request's
+	// balance/subscription charge. Only this settlement path includes tombstones.
 	res, err := tx.ExecContext(ctx, `
 		WITH current_key AS (
 			SELECT

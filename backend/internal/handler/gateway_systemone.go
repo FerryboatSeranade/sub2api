@@ -74,6 +74,12 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "System One is only available for TypeSafe and compatible Composite groups")
 		return
 	}
+	auditRecorder := beginUserRequestAudit(c, h.userRequestAuditService, service.ContentModerationProtocolTypeSafeSystemOne, endpointForAudit(c, "/v1/systemone"), model, body, apiKey, subject.UserID)
+	defer func() {
+		if auditRecorder != nil {
+			auditRecorder.Finish(c.Writer.Status(), nil, nil)
+		}
+	}()
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolTypeSafeSystemOne, model, body); decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)
 		return

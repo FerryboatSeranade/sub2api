@@ -88,6 +88,23 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	routingModel string,
 	routingServiceTier string,
 ) (http.Header, openAIWSSessionHeaderResolution, error) {
+	headers, resolution, _, err := s.buildOpenAIWSHeadersWithTicket(ctx, c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, routingModel, routingServiceTier)
+	return headers, resolution, err
+}
+
+func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithTicket(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	token string,
+	decision OpenAIWSProtocolDecision,
+	isCodexCLI bool,
+	turnState string,
+	turnMetadata string,
+	promptCacheKey string,
+	routingModel string,
+	routingServiceTier string,
+) (http.Header, openAIWSSessionHeaderResolution, *openAICodexTicket, error) {
 	headers := make(http.Header)
 	if account == nil || !account.IsOpenAIAgentIdentity() {
 		headers.Set("authorization", "Bearer "+token)
@@ -112,6 +129,13 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		} {
 			if value := c.Request.Header.Get(name); strings.TrimSpace(value) != "" {
 				headers.Set(name, value)
+			}
+		}
+		if account != nil && account.UsesOpenAICodexProtocol() {
+			for _, name := range [...]string{"x-codex-parent-thread-id", "x-openai-subagent", "x-openai-memgen-request", "x-responsesapi-include-timing-metrics"} {
+				if value := strings.TrimSpace(c.Request.Header.Get(name)); value != "" {
+					headers.Set(name, value)
+				}
 			}
 		}
 	}
@@ -141,24 +165,41 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if state := strings.TrimSpace(turnState); state != "" {
 		headers.Set(openAIWSTurnStateHeader, state)
 	}
-	if err := s.applyOpenAICodexTicket(ctx, account, routingModel, headers); err != nil {
-		return nil, sessionResolution, err
+	// 与 HTTP 出站同一守卫：异账号铸造的回带先剥离，剩下的就是本回合
+	// 真实血统；applyOpenAICodexTicketWithGeneration 只在头缺失时注入。
+	s.guardOpenAICodexTurnStateEcho(c, account, headers)
+	ticket, err := s.applyOpenAICodexTicketWithGeneration(ctx, account, routingModel, headers)
+	if err != nil {
+		return nil, sessionResolution, nil, err
 	}
 	if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
 		headers.Set(openAIWSTurnMetadataHeader, metadata)
 	}
 	applyCodexAccountIdentityHeaders(headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+	// 官方握手只发连字符 session-id / thread-id（headers.rs:5-11）。客户端没带
+	// session-id 时，上面按 prompt_cache_key 派生的隔离值只落在了官方不发的
+	// session_id 上；线序收口删除该头后会同时丢掉多用户隔离。这里把同一份隔离
+	// 值复制到官方字段（不做二次 namespace 变换，避免与帧内 client_metadata
+	// 的单次作用域不一致），再交给后面的收口删除非官方名。
+	if account != nil && account.UsesOpenAICodexProtocol() && strings.TrimSpace(headers.Get("session-id")) == "" {
+		if isolated := strings.TrimSpace(headers.Get("session_id")); isolated != "" {
+			headers.Set("session-id", isolated)
+		}
+	}
 	applyStagedCodexFingerprintHeaders(c, account, headers)
 
 	if account != nil && account.UsesOpenAICodexProtocol() {
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, headers, account); err != nil {
-			return nil, sessionResolution, fmt.Errorf("resolve chatgpt account headers: %w", err)
+			return nil, sessionResolution, nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
 		headers.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 	}
 
 	betaValue := openAIWSBetaV2Value
-	if decision.Transport == OpenAIUpstreamTransportResponsesWebsocket {
+	// Official Codex currently uses the V2 Responses WebSocket contract for
+	// ChatGPT OAuth/SetupToken accounts. Keep API-key compatibility transports
+	// on their negotiated beta value, but never downgrade the Codex lane.
+	if (account == nil || !account.UsesOpenAICodexProtocol()) && decision.Transport == OpenAIUpstreamTransportResponsesWebsocket {
 		betaValue = openAIWSBetaV1Value
 	}
 	headers.Set("OpenAI-Beta", betaValue)
@@ -197,7 +238,23 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		"soft_routing_hint",
 	)
 
-	return headers, sessionResolution, nil
+	// WS 握手线序收口：官方握手集 = build_responses_headers + originator +
+	// x-client-request-id + session-id/thread-id + 兼容头 + routing hint +
+	// OpenAI-Beta (core/src/client.rs:1304-1337). Provider/auth/default headers
+	// are merged separately, including version and account authentication.
+	// Legacy underscore IDs, installation-id and accept-language are stripped;
+	// OpenAI-Beta and x-client-request-id remain on the WS lane.
+	//
+	// 注意：这只是本函数输出的第一道收口。三条 WS 通道（v2 forwarder、
+	// v2 passthrough adapter、ingress）在拿到头之后还会调用
+	// normalizeCodexRequestMetadata*，按旧习惯把 session_id /
+	// x-codex-installation-id 写回来（legacy compact 依赖它们，源头不能删），
+	// 所以那些通道在归一化之后必须再执行一次同一收口——终态线序以最后一步为准。
+	if account != nil && account.UsesOpenAICodexProtocol() {
+		projectCodexOutboundHeaders(headers, true)
+	}
+
+	return headers, sessionResolution, ticket, nil
 }
 
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {
@@ -374,11 +431,11 @@ func setPreviousResponseIDToRawPayload(payload []byte, previousResponseID string
 		return nil, err
 	}
 	reqBody["previous_response_id"] = normalizedPrevID
-	rebuilt, marshalErr := json.Marshal(reqBody)
+	rebuilt, marshalErr := marshalOpenAIUpstreamJSON(reqBody)
 	if marshalErr != nil {
 		return nil, marshalErr
 	}
-	return rebuilt, nil
+	return restoreOpenAIUpstreamJSONTopLevelOrder(payload, rebuilt), nil
 }
 
 type openAIWSContextWindowBoundary struct {

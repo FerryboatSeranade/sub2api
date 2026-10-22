@@ -20,12 +20,10 @@ func TestLockAndMergeAccountExtraPreservesLatestCodexTicket(t *testing.T) {
 	mock.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).
 		WithArgs(int64(41), service.PlatformOpenAI, service.AccountTypeOAuth, `{"access_token":"test"}`, nil).
 		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot", "opencode_group_unchanged", "opencode_auto", "opencode_snapshot", "current_extra"}).
-			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, []byte(`{"codex_turn_ticket:model":{"state":"latest-database-ticket"},"latest_serial_model_test":{"status":"completed"},"old_admin_setting":true}`)))
+			AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, []byte(`{"codex_turn_ticket:model":{"state":"latest-database-ticket"},"old_admin_setting":true}`)))
 	account := &service.Account{ID: 41, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "test"}, Extra: map[string]any{"codex_turn_ticket:model": map[string]any{"state": "stale"}, "codex_turn_ticket:injected": map[string]any{"state": "spoofed"}, "new_admin_setting": true}}
-	account.Extra[service.SerialTestExtraKey] = map[string]any{"status": "stale"}
 	extra, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
 	require.NoError(t, err)
-	require.Equal(t, map[string]any{"status": "completed"}, extra[service.SerialTestExtraKey])
 	require.Equal(t, map[string]any{"state": "latest-database-ticket"}, extra["codex_turn_ticket:model"])
 	require.NotContains(t, extra, "codex_turn_ticket:injected")
 	require.NotContains(t, extra, "old_admin_setting")

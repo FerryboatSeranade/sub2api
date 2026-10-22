@@ -1232,6 +1232,8 @@ export interface OpenCodeGoUsageSettings {
   debounce_minutes: number
 }
 
+export type { BPSCredentialState } from "@/utils/openaiBps"
+
 export interface Account {
   id: number
   name: string
@@ -1244,18 +1246,27 @@ export interface Account {
   // 改为通过 credentials_status.has_<key> 暴露存在性。
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
+  bps_credential_state?: import("@/utils/openaiBps").BPSCredentialState
   ollama_cloud_usage?: OllamaCloudUsageState
+  opencode_go_usage?: OpenCodeGoUsageState
+  codex_ticket_latest_event?: { model: string; kind: string; occurred_at: string }
   codex_turn_tickets?: Array<{
     model: string
     length?: number
     ready: boolean
     remaining_seconds: number
     blocked: boolean
+    captured_at?: string
+    turn_state_present?: boolean
+    cookie_present?: boolean
+    fingerprint_commit?: string
+    harvest_enabled?: boolean
+    harvest_paused?: boolean
     expires_at?: string
   }>
-  opencode_go_usage?: OpenCodeGoUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
+    openai_request_timezone?: string
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean
@@ -1340,7 +1351,7 @@ export interface Account {
   tls_fingerprint_profile_id?: number | null
 
   // 会话ID伪装（仅 Anthropic OAuth/SetupToken 账号有效）
-  // 启用后将在15分钟内固定 metadata.user_id 中的 session ID
+  // 按账号命名空间重映射，保留独立会话与父子关联；闲置15分钟后更新命名空间
   session_id_masking_enabled?: boolean | null
 
   // 缓存 TTL 强制替换（仅 Anthropic OAuth/SetupToken 账号有效）

@@ -425,7 +425,9 @@ var ErrNoAvailableAccounts = errors.New("no available accounts")
 // ErrClaudeCodeOnly 表示分组仅允许 Claude Code 客户端访问
 var ErrClaudeCodeOnly = errors.New("this group only allows Claude Code clients")
 
-// allowedHeaders 白名单headers（参考CRS项目）
+// allowedHeaders is the client-header passthrough allowlist. Optional Claude
+// Code gateway hints are forwarded only when the client supplied them; the
+// gateway never synthesizes these identity/routing hints.
 var allowedHeaders = map[string]bool{
 	"accept":                                    true,
 	"x-stainless-retry-count":                   true,
@@ -447,7 +449,56 @@ var allowedHeaders = map[string]bool{
 	"content-type":                              true,
 	"accept-encoding":                           true,
 	"x-claude-code-session-id":                  true,
+	"x-claude-code-agent-id":                    true,
+	"x-claude-code-parent-agent-id":             true,
+	"x-claude-code-request-class":               true,
+	"x-claude-code-agent-type":                  true,
+	"x-claude-code-prompt-id":                   true,
+	"anthropic-usage-limit":                     true,
+	"x-claude-code-prev-tool-durations":         true,
+	"x-claude-code-context-compacted":           true,
+	"x-cc-context-compacted":                    true,
+	"x-claude-code-compaction":                  true,
+	"x-cc-compaction-request":                   true,
+	"x-anthropic-additional-protection":         true,
 	"x-client-request-id":                       true,
+	"x-client-app":                              true,
+	"x-claude-remote-container-id":              true,
+	"x-claude-remote-session-id":                true,
+	"anthropic-client-platform":                 true,
+	"anthropic-client-version":                  true,
+	"x-cc-fallback-category":                    true,
+	"x-cc-fallback-from-model":                  true,
+	"x-cc-fallback-latched-by":                  true,
+	"x-cc-fallback-trigger":                     true,
+	"x-cc-original-request-id":                  true,
+	"x-is-refusal-fallback":                     true,
+}
+
+var claudeCodeOptionalHeaders = map[string]bool{
+	"x-claude-code-agent-id":            true,
+	"x-claude-code-parent-agent-id":     true,
+	"x-claude-code-request-class":       true,
+	"x-claude-code-agent-type":          true,
+	"x-claude-code-prompt-id":           true,
+	"anthropic-usage-limit":             true,
+	"x-claude-code-prev-tool-durations": true,
+	"x-claude-code-context-compacted":   true,
+	"x-cc-context-compacted":            true,
+	"x-claude-code-compaction":          true,
+	"x-cc-compaction-request":           true,
+	"x-anthropic-additional-protection": true,
+	"x-client-app":                      true,
+	"x-claude-remote-container-id":      true,
+	"x-claude-remote-session-id":        true,
+	"anthropic-client-platform":         true,
+	"anthropic-client-version":          true,
+	"x-cc-fallback-category":            true,
+	"x-cc-fallback-from-model":          true,
+	"x-cc-fallback-latched-by":          true,
+	"x-cc-fallback-trigger":             true,
+	"x-cc-original-request-id":          true,
+	"x-is-refusal-fallback":             true,
 }
 
 // ErrStickySessionNotFound is returned by GatewayCache.GetSessionAccountID
@@ -654,6 +705,9 @@ type ForwardResult struct {
 	// CacheStorageTokenHours 显式上下文缓存的存储量（缓存 token 数 × 存储小时数），按计费模型的
 	// 存储单价折算为费用后叠加在 token 费用之上。
 	CacheStorageTokenHours float64
+
+	hostedSearchRounds     []*ForwardResult
+	hostedSearchRoundCosts []*CostBreakdown
 }
 
 // GatewayFailureStage identifies which request stage failed. The zero value is
@@ -1525,6 +1579,9 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	platforms := make(map[string]struct{})
 	ownership := CompositeModelOwnership{}
 	for _, account := range accounts {
+		if account.Platform == PlatformOpenAIBPS {
+			continue
+		}
 		if explicitModelMappingClaims(account, model) {
 			platforms[account.Platform] = struct{}{}
 			ownership.OpenAIGatewayOAuthClaimed = ownership.OpenAIGatewayOAuthClaimed ||

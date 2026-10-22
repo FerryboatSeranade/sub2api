@@ -339,6 +339,7 @@ gateway:
   # The harvest proxy should rotate egress IPs itself (fresh CONNECT per request).
   # Credential shadow accounts retain their existing forwarding policy and are not ticket-gated.
   openai_codex_ticket:
+    # Disabled by default. Enable manually in admin settings when needed.
     enabled: false
     target_length: 292
     ttl_seconds: 3600

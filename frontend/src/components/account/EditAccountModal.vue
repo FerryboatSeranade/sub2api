@@ -26,6 +26,8 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
+      <OpenAIBPSAccountFields v-if="account.platform === 'openai_bps'" v-model="bpsDraft" editing :expires-at="String(account.credentials?.expires_at ?? '')" :credential-state="account.bps_credential_state" :account-status="account.status" :schedulable="account.schedulable" />
+
       <!-- API Key fields (only for apikey type) -->
       <TestedModelMapping v-if="show" :account-id="account.id" @apply="applyTestedMapping" />
       <div v-if="account.type === 'apikey'" class="space-y-4">
@@ -245,7 +247,9 @@
                     ? 'sk-...'
                     : account.platform === 'grok'
                       ? 'xai-...'
-                      : 'sk-ant-...'
+                      : account.platform === 'typesafe'
+                        ? 'ts-...'
+                        : 'sk-ant-...'
             "
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
@@ -1893,6 +1897,8 @@
         </div>
       </div>
 
+      <OpenAIRequestTimezoneField v-if="account?.platform === 'openai'" v-model="openAIRequestTimezone" />
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -2249,9 +2255,9 @@
         </div>
       </div>
 
-      <!-- Anthropic / OpenAI API Key: Web Search Emulation (hidden when global disabled) -->
+      <!-- API Key: Web Search Emulation (hidden when global disabled) -->
       <div
-        v-if="(account?.platform === 'anthropic' || account?.platform === 'openai') && account?.type === 'apikey' && webSearchGlobalEnabled"
+        v-if="supportsWebSearchEmulation(account?.platform) && account?.type === 'apikey' && webSearchGlobalEnabled"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -2405,6 +2411,43 @@
         </div>
       </div>
 
+      <!-- 自建推理上游：客户端断开即取消上游 / 非流式 Responses 空白心跳 -->
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+        class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div
+          v-for="item in selfHostedUpstreamToggles"
+          :key="item.key"
+          class="flex items-center justify-between gap-4"
+        >
+          <div>
+            <label class="input-label mb-0">{{ t(item.label) }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t(item.desc) }}
+            </p>
+          </div>
+          <button
+            type="button"
+            :data-testid="item.testId"
+            role="switch"
+            :aria-checked="item.state.value"
+            @click="item.state.value = !item.state.value"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              item.state.value ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                item.state.value ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <div
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -2460,27 +2503,19 @@
         </div>
       </div>
 
-      <!-- Codex 292 门票状态（仅 OpenAI OAuth） -->
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicket') }}</label>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('admin.accounts.openai.codexTurnTicketDesc') }}
-        </p>
-        <div class="mt-3 space-y-1.5">
-          <div v-for="ticket in codexTurnTickets" :key="ticket.model" class="flex items-center justify-between text-sm">
-            <span class="font-medium">{{ ticket.model }}</span>
-            <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">
-              {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
-            </span>
-            <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
-              {{ t('admin.accounts.openai.codexTurnTicketPaused') }}
-            </span>
-            <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
-          </div>
-        </div>
+      <div v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && !isSparkShadow" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label" for="codex-ticket-account-policy">{{ t('admin.accounts.openai.codexTicketAccountPolicy') }}</label>
+        <select id="codex-ticket-account-policy" v-model="codexTicketAccountPolicy" class="input" data-testid="codex-ticket-account-policy">
+          <option value="inherit">{{ t('admin.accounts.openai.codexTicketPolicyInherit') }}</option>
+          <option value="allow">{{ t('admin.accounts.openai.codexTicketPolicyAllow') }}</option>
+          <option value="deny">{{ t('admin.accounts.openai.codexTicketPolicyDeny') }}</option>
+        </select>
+        <p class="input-hint">{{ t('admin.accounts.openai.codexTicketAccountPolicyDesc') }}</p>
+      </div>
+
+      <div v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="flex items-center justify-between gap-3"><label class="input-label mb-0">{{ t('admin.accounts.openai.codexTicketHistory') }}</label><button type="button" class="text-xs font-semibold text-indigo-600 dark:text-indigo-400" @click="emit('codex-tickets')">{{ t('admin.accounts.openai.codexTicketHistory') }} →</button></div>
+        <div class="mt-3 grid gap-2 sm:grid-cols-2"><div v-for="ticket in codexTurnTickets" :key="ticket.model" class="rounded-lg border border-gray-200 p-3 text-xs dark:border-dark-600"><div class="flex justify-between gap-2"><span class="break-all font-mono font-semibold">{{ ticket.model }}</span><span :class="ticket.ready ? 'text-emerald-600' : 'text-amber-600'">{{ ticket.ready ? '●' : '○' }} {{ t(ticket.ready ? 'admin.accounts.openai.codexTicketReadyShort' : 'admin.accounts.openai.codexTicketMissingShort') }}</span></div><p class="mt-2 text-gray-500">{{ ticket.length }} bytes · turn-state {{ ticket.turn_state_present ? '✓' : '—' }} · Cookie {{ ticket.cookie_present ? '✓' : '—' }}</p></div></div>
       </div>
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
@@ -3204,9 +3239,14 @@
         <button @click="handleClose" type="button" class="btn btn-secondary">
           {{ t('common.cancel') }}
         </button>
+        <button v-if="account.platform === 'openai_bps'" type="submit" form="edit-account-form" :disabled="submitting"
+          class="btn btn-secondary" data-testid="bps-save-and-test" @click="bpsTestAfterSave = true">
+          {{ t('admin.accounts.bps.saveAndTest') }}
+        </button>
         <button
           type="submit"
           form="edit-account-form"
+          @click="bpsTestAfterSave = false"
           :disabled="submitting"
           class="btn btn-primary"
           data-tour="account-form-submit"
@@ -3251,6 +3291,8 @@
 </template>
 
 <script setup lang="ts">
+import OpenAIBPSAccountFields from './OpenAIBPSAccountFields.vue'
+import { newBPSAccountDraft, bpsCredentials } from '@/utils/openaiBps'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -3279,6 +3321,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import OpenAIRequestTimezoneField from '@/components/account/OpenAIRequestTimezoneField.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -3341,6 +3384,7 @@ import {
 } from '@/utils/format'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import { supportsWebSearchEmulation } from '@/utils/webSearchEmulation'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
@@ -3372,7 +3416,9 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
+  test: [account: Account]
   updated: [account: Account]
+  'codex-tickets': []
 }>()
 
 const { t } = useI18n()
@@ -3396,12 +3442,7 @@ const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
 const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
 
-function formatCodexTicketRemaining(seconds: number) {
-  const total = Math.max(0, Math.floor(seconds || 0))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}m${String(s).padStart(2, '0')}s`
-}
+
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -3498,7 +3539,7 @@ const baseUrlHint = computed(() => {
   if (!props.account) return t('admin.accounts.baseUrlHint')
   if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
-  if (props.account.platform === 'grok') return ''
+  if (props.account.platform === 'grok' || props.account.platform === 'typesafe') return ''
   return t('admin.accounts.baseUrlHint')
 })
 
@@ -3888,9 +3929,29 @@ const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
+const openAIRequestTimezone = ref('Asia/Singapore')
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
+// 自建推理上游（OpenAI API Key）：按 GPU 时间付费，缺省关闭即保持原有计费语义
+const cancelUpstreamOnClientDisconnect = ref(false)
+const responsesNonstreamKeepalive = ref(false)
+const selfHostedUpstreamToggles = [
+  {
+    key: 'cancel_upstream_on_client_disconnect',
+    state: cancelUpstreamOnClientDisconnect,
+    label: 'admin.accounts.openai.cancelUpstreamOnClientDisconnect',
+    desc: 'admin.accounts.openai.cancelUpstreamOnClientDisconnectDesc',
+    testId: 'openai-cancel-upstream-on-disconnect-toggle'
+  },
+  {
+    key: 'responses_nonstream_keepalive',
+    state: responsesNonstreamKeepalive,
+    label: 'admin.accounts.openai.responsesNonstreamKeepalive',
+    desc: 'admin.accounts.openai.responsesNonstreamKeepaliveDesc',
+    testId: 'openai-responses-nonstream-keepalive-toggle'
+  }
+] as const
 // OpenAI 订阅档位（Plus / Pro 20x / Pro 5x / Business Standard / Business Premium / Free）手动覆盖值,
 // 存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
@@ -3901,6 +3962,8 @@ const openAIImagesUrlToB64JsonEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+type CodexTicketAccountPolicy = 'inherit' | 'allow' | 'deny'
+const codexTicketAccountPolicy = ref<CodexTicketAccountPolicy>('inherit')
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
@@ -4229,6 +4292,9 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
+const bpsDraft = ref(newBPSAccountDraft())
+const bpsTestAfterSave = ref(false)
+
 const form = reactive({
   name: '',
   notes: '',
@@ -4338,6 +4404,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningDetails.value = null
   mixedChannelWarningRawMessage.value = ''
   mixedChannelWarningAction.value = null
+  bpsDraft.value = newBPSAccountDraft(newAccount.credentials)
+  bpsTestAfterSave.value = false
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
@@ -4389,8 +4457,13 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
+  openAIRequestTimezone.value = 'Asia/Singapore'
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
+  cancelUpstreamOnClientDisconnect.value =
+    newAccount.platform === 'openai' && newAccount.type === 'apikey' && extra?.cancel_upstream_on_client_disconnect === true
+  responsesNonstreamKeepalive.value =
+    newAccount.platform === 'openai' && newAccount.type === 'apikey' && extra?.responses_nonstream_keepalive === true
   editPlanType.value = ''
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
@@ -4400,6 +4473,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexTicketAccountPolicy.value = 'inherit'
   codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
@@ -4407,6 +4481,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
+    openAIRequestTimezone.value = typeof extra?.openai_request_timezone === 'string' ? extra.openai_request_timezone : 'Asia/Singapore'
     openaiFlattenNamespacesEnabled.value =
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
     const longContextBillingValue = extra?.openai_long_context_billing_enabled
@@ -4448,6 +4523,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       defaultMode: OPENAI_WS_MODE_OFF
     })
     if (newAccount.type === 'oauth' || newAccount.type === 'setup-token') {
+      codexTicketAccountPolicy.value = extra?.codex_allow_without_ticket === true ? 'allow' : extra?.codex_allow_without_ticket === false ? 'deny' : 'inherit'
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
       codexCLIOnlyAppServerEnabled.value =
         extra?.codex_cli_only_allow_app_server === true
@@ -4471,7 +4547,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       ? 'authorization_bearer'
       : 'x_api_key'
   }
-  if ((newAccount.platform === 'anthropic' || newAccount.platform === 'openai') && newAccount.type === 'apikey') {
+  if (supportsWebSearchEmulation(newAccount.platform) && newAccount.type === 'apikey') {
     // 三态：string "default"/"enabled"/"disabled"，向后兼容旧 bool
     const wsVal = extra?.web_search_emulation
     if (wsVal === 'enabled' || wsVal === 'disabled') {
@@ -5349,8 +5425,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))
     updatedAccount = await persistGrokMediaEligibility(accountID, updatedAccount)
     appStore.showSuccess(t('admin.accounts.accountUpdated'))
+    const openBPSTest = updatedAccount.platform === 'openai_bps' && bpsTestAfterSave.value
     emit('updated', updatedAccount)
     handleClose()
+    if (openBPSTest) emit('test', updatedAccount)
   } catch (error: any) {
     if (error.status === 409 && error.error === 'mixed_channel_warning' && needsMixedChannelCheck()) {
       openMixedChannelDialog({
@@ -5405,6 +5483,10 @@ const handleSubmit = async () => {
       if (upstreamBillingRateSyncEnabled.value) {
         delete updatePayload.rate_multiplier
       }
+    }
+
+    if (props.account.platform === 'openai_bps') {
+      updatePayload.credentials = bpsCredentials(bpsDraft.value)
     }
 
     // For apikey type, handle credentials update
@@ -5911,7 +5993,7 @@ const handleSubmit = async () => {
       updatePayload.extra = newExtra
     }
 
-    // For Anthropic API Key accounts, handle passthrough mode + web search emulation in extra
+    // For Anthropic API Key accounts, handle passthrough mode in extra
     if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
       const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
@@ -5925,11 +6007,6 @@ const handleSubmit = async () => {
       } else {
         delete newExtra.anthropic_apikey_auth_scheme
       }
-      if (webSearchEmulationMode.value === 'default') {
-        delete newExtra.web_search_emulation
-      } else {
-        newExtra.web_search_emulation = webSearchEmulationMode.value
-      }
       updatePayload.extra = newExtra
     }
 
@@ -5937,6 +6014,7 @@ const handleSubmit = async () => {
     if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey')) {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
+      newExtra.openai_request_timezone = openAIRequestTimezone.value
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
@@ -5963,6 +6041,14 @@ const handleSubmit = async () => {
         delete newExtra.openai_long_context_billing_enabled
       } else {
         newExtra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
+      }
+      // 缺省关闭不写入，避免 extra 里堆积默认项
+      for (const item of selfHostedUpstreamToggles) {
+        if (props.account.type === 'apikey' && item.state.value) {
+          newExtra[item.key] = true
+        } else {
+          delete newExtra[item.key]
+        }
       }
       if (openAICompactMode.value === 'auto') {
         delete newExtra.openai_compact_mode
@@ -6031,6 +6117,11 @@ const handleSubmit = async () => {
       }
 
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
+        if (codexTicketAccountPolicy.value === 'inherit') {
+          delete newExtra.codex_allow_without_ticket
+        } else {
+          newExtra.codex_allow_without_ticket = codexTicketAccountPolicy.value === 'allow'
+        }
         if (codexCLIOnlyEnabled.value) {
           newExtra.codex_cli_only = true
         } else if (hadCodexCLIOnlyEnabled) {
@@ -6058,6 +6149,18 @@ const handleSubmit = async () => {
         }
       }
 
+      updatePayload.extra = newExtra
+    }
+
+    // Compose the search override after platform extras so neither overwrites the other.
+    if (supportsWebSearchEmulation(props.account.platform) && props.account.type === 'apikey') {
+      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
+      const newExtra: Record<string, unknown> = { ...currentExtra }
+      if (webSearchEmulationMode.value === 'default') {
+        delete newExtra.web_search_emulation
+      } else {
+        newExtra.web_search_emulation = webSearchEmulationMode.value
+      }
       updatePayload.extra = newExtra
     }
 

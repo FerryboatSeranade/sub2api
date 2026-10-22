@@ -51,6 +51,7 @@ type GatewayHandler struct {
 	usageRecordWorkerPool     *service.UsageRecordWorkerPool
 	errorPassthroughService   *service.ErrorPassthroughService
 	contentModerationService  *service.ContentModerationService
+	userRequestAuditService   *service.UserRequestAuditService
 	securityAuditCoordinator  *securityaudit.Coordinator
 	// geminiCachedContentService 管理 Gemini 显式缓存；为 nil 时相关接口不可用。
 	geminiCachedContentService *service.GeminiCachedContentService
@@ -188,6 +189,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		reqStream = parsedReq.Stream
 	}
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
+	auditRecorder := beginUserRequestAudit(c, h.userRequestAuditService, service.ContentModerationProtocolAnthropicMessages, endpointForAudit(c, "/v1/messages"), reqModel, body, apiKey, subject.UserID)
+	defer func() {
+		if auditRecorder != nil {
+			auditRecorder.Finish(c.Writer.Status(), nil, nil)
+		}
+	}()
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
@@ -598,7 +605,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			forceCacheBilling := fs.ForceCacheBilling
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			sessionID := service.ExtractClientSessionID(c)
-			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+			h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:             result,
 					QuotaPlatform:      quotaPlatform,
@@ -964,7 +971,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				forceCacheBilling := fs.ForceCacheBilling
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
 				sessionID := service.ExtractClientSessionID(c)
-				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+				h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 						Result:             result,
 						QuotaPlatform:      quotaPlatform,
@@ -1168,16 +1175,20 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	if platform == service.PlatformComposite {
-		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID, "", true)
+		availableModels, err := h.compositeAvailableModels(c.Request.Context(), groupID, "", true)
+		if err != nil {
+			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to load composite model catalog")
+			return
+		}
 		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 			source := availableModels
-			if len(source) == 0 {
+			if source == nil {
 				source = defaultModelIDsForPlatform(service.PlatformComposite)
 			}
 			writeAllowlistedModelsList(c, service.PlatformComposite, apiKey.Group.ModelAllowlist.FilterForListing(source))
 			return
 		}
-		if len(availableModels) > 0 {
+		if availableModels != nil {
 			writeModelsList(c, service.PlatformComposite, availableModels)
 			return
 		}
@@ -1198,6 +1209,10 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
+	if platform == service.PlatformOpenAIBPS {
+		writeModelsList(c, platform, service.OpenAIBPSDefaultModels())
+		return
+	}
 	// Fallback to default models
 	if platform == service.PlatformOpenAI {
 		writeModelsListResponse(c, openai.DefaultModels)
@@ -1234,7 +1249,11 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 	if value, exists := middleware2.GetForcePlatformFromContext(c); exists {
 		forcedPlatform = strings.TrimSpace(value)
 	}
-	modelIDs := h.codexModelIDsForGroup(c.Request.Context(), apiKey.Group, forcedPlatform)
+	modelIDs, err := h.codexModelIDsForGroup(c.Request.Context(), apiKey.Group, forcedPlatform)
+	if err != nil {
+		h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to load composite model catalog")
+		return
+	}
 	modelIDs = service.FilterCodexModelIDsForGroup(modelIDs, apiKey.Group)
 	body, err := h.gatewayService.BuildCodexModelsManifestForGroup(
 		c.Request.Context(),
@@ -1256,9 +1275,9 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", body)
 }
 
-func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *service.Group, platformOverride string) []string {
+func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *service.Group, platformOverride string) ([]string, error) {
 	if h == nil || h.gatewayService == nil || group == nil {
-		return nil
+		return nil, nil
 	}
 
 	groupID := &group.ID
@@ -1267,43 +1286,49 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 		platform = group.Platform
 	}
 	if platform == service.PlatformComposite {
-		availableModels := h.compositeAvailableModels(ctx, groupID, service.CompositeRouteEndpointResponses, false)
+		availableModels, err := h.compositeAvailableModels(ctx, groupID, service.CompositeRouteEndpointResponses, false)
+		if err != nil {
+			return nil, err
+		}
 		fallbackModels := defaultCodexModelIDsForPlatform(service.PlatformComposite)
 		models := availableModels
-		if len(models) == 0 {
+		if models == nil {
 			models = fallbackModels
 		}
 		if group.ModelAllowlistEnabled() {
 			models = group.ModelAllowlist.FilterForListing(models)
 		}
 		if filtered, err := h.gatewayService.FilterCompositeCodexModels(ctx, group.ID, models); err == nil {
-			return filtered
+			return filtered, nil
 		}
-		return models
+		return models, nil
 	}
 
 	availableModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
 	fallbackModels := defaultCodexModelIDsForPlatform(platform)
 	if group.ModelAllowlistEnabled() {
-		return group.ModelAllowlist.FilterForListing(modelListingSource(platform, availableModels, fallbackModels))
+		return group.ModelAllowlist.FilterForListing(modelListingSource(platform, availableModels, fallbackModels)), nil
 	}
 	if len(availableModels) > 0 {
-		return availableModels
+		return availableModels, nil
 	}
-	return fallbackModels
+	return fallbackModels, nil
 }
 
 // compositeAvailableModels lists the models the composite group can serve.
 // includeSystemOne adds TypeSafe models, which only work through /v1/systemone;
 // LLM client catalogs (Codex) must exclude them.
-func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *int64, endpoint string, includeSystemOne bool) []string {
+func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *int64, endpoint string, includeSystemOne bool) ([]string, error) {
 	if h == nil || h.gatewayService == nil {
-		return nil
+		return nil, nil
 	}
 	seen := make(map[string]struct{})
 	models := make([]string, 0)
 	schedulablePlatforms := h.gatewayService.GetSchedulablePlatforms(ctx, groupID)
 	for _, platform := range domain.CompositePrecedencePlatformIDs() {
+		if platform == service.PlatformOpenAIBPS {
+			continue
+		}
 		if platform == service.PlatformTypeSafe && !includeSystemOne {
 			continue
 		}
@@ -1337,11 +1362,11 @@ func (h *GatewayHandler) compositeAvailableModels(ctx context.Context, groupID *
 			}
 		}
 	}
-	return models
+	return h.gatewayService.CompleteCompositeBPSModelCatalog(ctx, groupID, models)
 }
 
 func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
-	if platform == service.PlatformOpenAI {
+	if platform == service.PlatformOpenAI || platform == service.PlatformOpenAIBPS {
 		writeOpenAIModelsList(c, modelIDs)
 		return
 	}
@@ -1362,7 +1387,7 @@ func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
 }
 
 func writeAllowlistedModelsList(c *gin.Context, platform string, modelIDs []string) {
-	if platform == service.PlatformOpenAI {
+	if platform == service.PlatformOpenAI || platform == service.PlatformOpenAIBPS {
 		writeOpenAIModelsList(c, modelIDs)
 		return
 	}
@@ -1482,6 +1507,8 @@ func defaultCodexModelIDsForPlatform(platform string) []string {
 
 func defaultModelIDsForPlatform(platform string) []string {
 	switch platform {
+	case service.PlatformOpenAIBPS:
+		return service.OpenAIBPSDefaultModels()
 	case service.PlatformOpenAI:
 		return openai.DefaultModelIDs()
 	case service.PlatformGemini:
@@ -2012,7 +2039,7 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 			if code != "" {
 				errorCode = `,"code":` + strconv.Quote(code)
 			}
-			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
+			errorEvent := "event: error\n" + `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + "}}\n\n"
 			if _, err := fmt.Fprint(c.Writer, errorEvent); err != nil {
 				_ = c.Error(err)
 			}
@@ -2258,7 +2285,7 @@ const (
 	InterceptTypeNone              InterceptType = iota
 	InterceptTypeWarmup                          // 预热请求（返回 "New Conversation"）
 	InterceptTypeSuggestionMode                  // SUGGESTION MODE（返回空字符串）
-	InterceptTypeMaxTokensOneHaiku               // max_tokens=1 + haiku 探测请求（返回 "#"）
+	InterceptTypeMaxTokensOneProbe               // Claude Code max_tokens=1 探测请求（返回 "#"）
 )
 
 // isHaikuModel 检查模型名称是否包含 "haiku"（大小写不敏感）
@@ -2280,9 +2307,9 @@ func isMaxTokensOneHaikuRequest(model string, maxTokens int) bool {
 //   - maxTokens: max_tokens 值
 //   - isClaudeCodeClient: 是否已通过 Claude Code 客户端校验
 func detectInterceptType(body []byte, model string, maxTokens int, isClaudeCodeClient bool) InterceptType {
-	// 优先检查 max_tokens=1 + haiku 探测请求（流式/非流式均适用）
-	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens) {
-		return InterceptTypeMaxTokensOneHaiku
+	// Claude Code 的 max_tokens=1 探测请求可使用当前模型，不限于 Haiku。
+	if isClaudeCodeClient && maxTokens == 1 {
+		return InterceptTypeMaxTokensOneProbe
 	}
 
 	// 快速检查：如果不包含任何关键字，直接返回
@@ -2356,12 +2383,18 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	var msgID string
 	var outputTokens int
 	var textDeltas []string
+	stopReason := "end_turn"
 
 	switch interceptType {
 	case InterceptTypeSuggestionMode:
 		msgID = generateRealisticMsgID()
 		outputTokens = 1
 		textDeltas = []string{""} // 空内容
+	case InterceptTypeMaxTokensOneProbe:
+		msgID = generateRealisticMsgID()
+		outputTokens = 1
+		textDeltas = []string{"#"}
+		stopReason = "max_tokens"
 	default: // InterceptTypeWarmup
 		msgID = generateRealisticMsgID()
 		outputTokens = 2
@@ -2384,7 +2417,7 @@ func sendMockInterceptStream(c *gin.Context, model string, interceptType Interce
 	}
 
 	// Add final events
-	messageDeltaJSON := `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"output_tokens":` + strconv.Itoa(outputTokens) + `}}`
+	messageDeltaJSON := `{"type":"message_delta","delta":{"stop_reason":"` + stopReason + `","stop_sequence":null,"stop_details":null},"usage":{"output_tokens":` + strconv.Itoa(outputTokens) + `}}`
 
 	events = append(events,
 		`event: content_block_stop`+"\n"+`data: {"index":0,"type":"content_block_stop"}`,
@@ -2426,7 +2459,7 @@ func sendMockInterceptResponse(c *gin.Context, model string, interceptType Inter
 		text = ""
 		outputTokens = 1
 		stopReason = "end_turn"
-	case InterceptTypeMaxTokensOneHaiku:
+	case InterceptTypeMaxTokensOneProbe:
 		msgID = generateRealisticMsgID()
 		text = "#"
 		outputTokens = 1

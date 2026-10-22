@@ -325,6 +325,118 @@ func TestSyncBalanceCacheAfterDeduction_SynchronousWhenInflightEnabled(t *testin
 	require.InDelta(t, 0.75, bal, 1e-12)
 }
 
+type failedDeductionInflightCache struct {
+	*memInflightCache
+	appliedBeforeError bool
+	invalidated        bool
+	invalidateStarted  chan struct{}
+	allowInvalidate    chan struct{}
+}
+
+func (m *failedDeductionInflightCache) GetUserBalance(context.Context, int64) (float64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.invalidated {
+		return 0, fmt.Errorf("cache miss")
+	}
+	return m.balance, nil
+}
+
+func (m *failedDeductionInflightCache) SetUserBalance(_ context.Context, _ int64, balance float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.balance = balance
+	m.invalidated = false
+	return nil
+}
+
+func (m *failedDeductionInflightCache) DeductUserBalance(_ context.Context, _ int64, amount float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deducts.Add(1)
+	if m.appliedBeforeError {
+		m.balance -= amount
+	}
+	return fmt.Errorf("Redis connection lost during deduction")
+}
+
+func (m *failedDeductionInflightCache) InvalidateUserBalance(ctx context.Context, _ int64) error {
+	close(m.invalidateStarted)
+	select {
+	case <-m.allowInvalidate:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.invalidated = true
+	return nil
+}
+
+func TestSyncBalanceCacheAfterDeduction_FailureHoldsReservationUntilInvalidation(t *testing.T) {
+	for _, applied := range []bool{false, true} {
+		t.Run(fmt.Sprintf("applied_before_error=%t", applied), func(t *testing.T) {
+			cache := &failedDeductionInflightCache{
+				memInflightCache:   newMemInflightCache(1),
+				appliedBeforeError: applied,
+				invalidateStarted:  make(chan struct{}),
+				allowInvalidate:    make(chan struct{}),
+			}
+			var unblockOnce sync.Once
+			unblock := func() { unblockOnce.Do(func() { close(cache.allowInvalidate) }) }
+			repo := &balanceLoadUserRepoStub{balance: 0.005} // Authoritative balance after DB commit.
+			cfg := &config.Config{}
+			cfg.Billing.MinimumBalanceReserve = 0.01
+			cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
+			svc := NewBillingCacheService(cache, repo, nil, nil, nil, nil, cfg, nil)
+			t.Cleanup(svc.Stop)
+			t.Cleanup(unblock)
+			user := &User{ID: 3}
+			res, err := svc.ReserveInflight(context.Background(), user, nil, nil, 0.995)
+			require.NoError(t, err)
+			require.NotNil(t, res)
+			taskDone := res.Acquire()
+			res.HandlerDone()
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				defer taskDone()
+				// A missing RETURNING result still requires cache synchronization.
+				syncBalanceCacheAfterDeduction(context.Background(), &postUsageBillingParams{
+					Cost: &CostBreakdown{ActualCost: 0.995}, User: user,
+				}, &billingDeps{billingCacheService: svc}, nil)
+			}()
+			select {
+			case <-cache.invalidateStarted:
+			case <-finished:
+				t.Fatal("billing task returned without synchronous invalidation")
+			case <-time.After(2 * time.Second):
+				t.Fatal("billing task did not reach invalidation")
+			}
+			require.Equal(t, 1, cache.count(), "hold must survive while invalidation is blocked")
+			require.Equal(t, int32(0), cache.releaseCt.Load())
+			_, err = svc.ReserveInflight(context.Background(), user, nil, nil, 0.995)
+			require.ErrorIs(t, err, ErrInsufficientBalance)
+
+			unblock()
+			select {
+			case <-finished:
+			case <-time.After(2 * time.Second):
+				t.Fatal("billing task did not finish after invalidation")
+			}
+			require.Equal(t, 0, cache.count())
+			require.Equal(t, int32(1), cache.releaseCt.Load())
+			require.ErrorIs(t, svc.CheckBillingEligibility(context.Background(), user, nil, nil, nil, ""), ErrInsufficientBalance)
+			require.Equal(t, int64(1), repo.calls.Load(), "eligibility must reload the committed DB balance")
+			svc.Stop() // Drain every queued write before inspecting final state.
+			require.Equal(t, int32(1), cache.deducts.Load(), "failed or ambiguous deduction must never be queued again")
+			balance, err := cache.GetUserBalance(context.Background(), user.ID)
+			require.NoError(t, err)
+			require.InDelta(t, 0.005, balance, 1e-12, "DB reload must not be debited again")
+		})
+	}
+}
+
 // 计费侧：requested 来源下别名本身无价 → billableModelWithFallback 回退到映射模型。
 // 准入估算必须同口径地 > 0，且等于按回退模型的估算。
 func TestInflightEstimate_RequestedSourceUnpricedAliasFallsBackLikeBilling(t *testing.T) {

@@ -3,9 +3,10 @@ package service
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/url"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexToolCapabilityFields = []string{
@@ -31,6 +32,8 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 				if json.Unmarshal(value, &tiers) != nil {
 					continue
 				}
+			} else if field == "comp_hash" && json.Valid(value) && value[0] >= '0' && value[0] <= '9' {
+				// Official descriptors use a numeric hash; older manifests use strings.
 			} else if field == "supports_search_tool" || field == "use_responses_lite" {
 				if !bytes.Equal(value, []byte("true")) && !bytes.Equal(value, []byte("false")) {
 					continue
@@ -91,6 +94,8 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 		target := modelID
 		if isOpenAIGPT6AstraModel(target) {
 			target = "gpt-6-astra"
+		} else if openai.IsGPT61SolModelSpelling(target) {
+			target = "gpt-6.1-sol"
 		}
 		_, disabled := apiKeyCodexModelsWithoutResponsesLite[target]
 		if disabled && bytes.Equal(capabilities["use_responses_lite"], []byte("true")) {

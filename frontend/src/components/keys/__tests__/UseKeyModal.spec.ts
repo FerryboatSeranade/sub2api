@@ -724,6 +724,12 @@ describe('UseKeyModal', () => {
     expect(models['gpt-6.1-sol'].variants).not.toHaveProperty('none')
     expect(models['gpt-6-sol'].variants).toHaveProperty('none')
     expect(models['gpt-6-luna'].limit).toEqual({ context: 1050000, output: 128000 })
+    for (const effort of ['none', 'minimal']) {
+      expect(models['gpt-6.1-sol'].variants).not.toHaveProperty(effort)
+    }
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      expect(models['gpt-6.1-sol'].variants).toHaveProperty(effort)
+    }
     expect(models['gpt-6']).toEqual({
       name: 'GPT-6 (Astra)',
       limit: { context: 1050000, output: 128000 },
@@ -1103,4 +1109,20 @@ describe('UseKeyModal', () => {
       }
     }
   )
+})
+
+describe('OpenAI BPS configuration', () => {
+  it('offers HTTP Codex only and selects the BPS candidate model', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-test', baseUrl: 'https://example.com/v1', platform: 'openai_bps' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: { template: '<span />' } } }
+    })
+    await nextTick()
+    expect(wrapper.text()).toContain('keys.useKeyModal.cliTabs.codexCli')
+    expect(wrapper.text()).not.toContain('keys.useKeyModal.cliTabs.codexCliWs')
+    expect(wrapper.text()).not.toContain('keys.useKeyModal.cliTabs.claudeCode')
+    expect(wrapper.text()).toContain('gpt-6-astra')
+    expect(wrapper.text()).toContain('supports_websockets = false')
+    wrapper.unmount()
+  })
 })

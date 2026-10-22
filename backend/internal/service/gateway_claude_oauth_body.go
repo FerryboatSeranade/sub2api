@@ -391,6 +391,7 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 		return body
 	}
 
+	captureClaudeBillingSource(c, body)
 	systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 	if systemPromptInjectionEnabled {
 		systemPromptBlocks = claudeOAuthSystemPromptBlocksForModel(model, systemPromptBlocks)

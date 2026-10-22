@@ -44,6 +44,16 @@ var (
 	sessionUserAgentVersionPattern = regexp.MustCompile(`\bv?\d+(?:\.\d+){1,3}\b`)
 )
 
+// decodeJSONUseNumber decodes JSON while retaining integer lexemes as
+// json.Number. Request filters rebuild only the fields they must change; using
+// the default interface decoder here would turn tool input/schema and metadata
+// integers above 2^53 into lossy float64 values.
+func decodeJSONUseNumber(data []byte, dst any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(dst)
+}
+
 // SessionContext 粘性会话上下文，用于区分不同来源的请求。
 // 仅在 GenerateSessionHash 第 3 级 fallback（消息内容 hash）时混入，
 // 避免不同用户发送相同消息产生相同 hash 导致账号集中。
@@ -532,7 +542,7 @@ func StripEmptyTextBlocks(body []byte) []byte {
 	}
 
 	var messages []any
-	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
+	if err := decodeJSONUseNumber(sliceRawFromBody(body, msgsRes), &messages); err != nil {
 		return body
 	}
 
@@ -756,7 +766,7 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 	}
 
 	var messages []any
-	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
+	if err := decodeJSONUseNumber(sliceRawFromBody(body, msgsRes), &messages); err != nil {
 		return body
 	}
 
@@ -1247,7 +1257,7 @@ func FilterSignatureSensitiveBlocksForRetry(body []byte, mappedModel string) []b
 	}
 
 	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
+	if err := decodeJSONUseNumber(body, &req); err != nil {
 		return body
 	}
 
@@ -1428,7 +1438,7 @@ func filterThinkingBlocksInternal(body []byte, alwaysThinking bool) []byte {
 	}
 
 	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
+	if err := decodeJSONUseNumber(body, &req); err != nil {
 		return body
 	}
 

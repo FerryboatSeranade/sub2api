@@ -86,6 +86,7 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // it omitted, so in that case the caches are rebuilt from storage rather than
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
+	s.InvalidateCodexProbeTemplateCache()
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
@@ -490,10 +491,27 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)
 	updates[SettingKeyOpenAICodexTicketEnabled] = strconv.FormatBool(settings.OpenAICodexTicketEnabled)
+	updates[SettingKeyOpenAICodexTicketAllowWithoutTicket] = strconv.FormatBool(settings.OpenAICodexTicketAllowWithoutTicket)
+	if _, err := ParseCodexProbeTemplate(settings.OpenAICodexTicketPromptTemplate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_PROBE_TEMPLATE", err.Error())
+	}
+	updates[SettingKeyOpenAICodexTicketPromptTemplate] = settings.OpenAICodexTicketPromptTemplate
 	if err := ValidateOpenAICodexTicketHarvestProxyURL(settings.OpenAICodexTicketHarvestProxyURL); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
 	}
 	updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL)
+	// 自动降智检测：nil = 请求未携带该配置，跳过写入以保留既有值（与
+	// DefaultPlatformQuotas 的整体替换语义一致）；非 nil 时先整体校验再落库。
+	if settings.CodexAutoDegradationCheck != nil {
+		if err := ValidateCodexAutoDegradationCheckSettings(settings.CodexAutoDegradationCheck); err != nil {
+			return nil, err
+		}
+		blob, err := json.Marshal(settings.CodexAutoDegradationCheck)
+		if err != nil {
+			return nil, fmt.Errorf("marshal codex auto degradation check settings: %w", err)
+		}
+		updates[SettingKeyCodexAutoDegradationCheck] = string(blob)
+	}
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。
 	updates[SettingKeyClaudeCodeClientVersion] = NormalizeClaudeCodeClientVersion(settings.ClaudeCodeClientVersion)
@@ -758,6 +776,9 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	s.InvalidateOpenAICodexTicketEnabledCache()
 	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	s.InvalidateClaudeCodeClientVersionCache()
+	s.InvalidateOpenAICodexTicketEnabledCache()
+	s.InvalidateOpenAICodexTicketAllowCache()
+	s.InvalidateOpenAICodexTicketHarvestProxyCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,

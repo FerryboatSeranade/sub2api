@@ -17,6 +17,7 @@ import { platformQuotaPlatforms } from '@/api/admin/users'
 const concretePlatforms = [
   'anthropic',
   'openai',
+  'openai_bps',
   'gemini',
   'antigravity',
   'grok',

@@ -124,6 +124,7 @@ func RegisterAdminRoutes(
 
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
+		registerUserRequestAuditRoutes(admin, h)
 
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
@@ -147,6 +148,23 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		promptAudit.POST("/events/delete-preview", h.Admin.PromptAudit.DeletePreview)
 		promptAudit.POST("/events/delete-by-filter", h.Admin.PromptAudit.DeleteByFilter)
 	}
+}
+
+func registerUserRequestAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	audits := admin.Group("/user-request-audit")
+	audits.GET("", h.Admin.UserRequestAudit.List)
+	audits.GET("/config", h.Admin.UserRequestAudit.GetConfig)
+	audits.PUT("/config", h.Admin.UserRequestAudit.UpdateConfig)
+	audits.GET("/groups", h.Admin.UserRequestAudit.Groups)
+	audits.GET("/models", h.Admin.UserRequestAudit.Models)
+	audits.GET("/status", h.Admin.UserRequestAudit.Status)
+	audits.POST("/cleanup", h.Admin.UserRequestAudit.Cleanup)
+	audits.POST("/export", h.Admin.UserRequestAudit.Export)
+	audits.GET("/exports", h.Admin.UserRequestAudit.Exports)
+	audits.GET("/exports/:job_id/download", h.Admin.UserRequestAudit.DownloadExport)
+	audits.POST("/clear", h.Admin.UserRequestAudit.Clear)
+	audits.GET("/:id", h.Admin.UserRequestAudit.Get)
+	audits.GET("/:id/conversation", h.Admin.UserRequestAudit.Conversation)
 }
 
 func registerAuditLogRoutes(admin *gin.RouterGroup, h *handler.Handlers, _ middleware.StepUpAuthMiddleware) {
@@ -359,6 +377,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)
+		accounts.GET("/openai-request-timezones", h.Admin.Account.GetOpenAIRequestTimezones)
 		accounts.GET("/upstream-billing-rates", h.Admin.Account.GetUpstreamBillingRates)
 		accounts.GET("/upstream-billing-probe/settings", h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", h.Admin.Account.UpdateUpstreamBillingProbeSettings)
@@ -368,6 +387,17 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/opencode-go-usage/settings", h.Admin.Account.GetOpenCodeGoUsageSettings)
 		accounts.PUT("/opencode-go-usage/settings", h.Admin.Account.UpdateOpenCodeGoUsageSettings)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
+		accounts.GET("/codex-ticket-cadence", h.Admin.Account.GetCodexTicketCadence)
+		accounts.PUT("/codex-ticket-cadence", h.Admin.Account.UpdateCodexTicketCadence)
+		accounts.GET("/codex-ticket-fingerprint", h.Admin.Account.GetCodexFingerprintVersion)
+		accounts.POST("/codex-ticket-fingerprint/refresh", h.Admin.Account.RefreshCodexFingerprint)
+		accounts.GET("/:id/codex-ticket-history", h.Admin.Account.GetCodexTicketHistory)
+		accounts.GET("/:id/codex-ticket-events", h.Admin.Account.GetCodexTicketEvents)
+		accounts.GET("/:id/codex-ticket-invalidations", h.Admin.Account.ListCodexTicketInvalidations)
+		accounts.GET("/:id/codex-ticket-invalidations/:event_id", h.Admin.Account.GetCodexTicketInvalidation)
+		accounts.POST("/:id/codex-ticket-harvest", h.Admin.Account.HarvestCodexTicket)
+		accounts.POST("/:id/codex-ticket-diagnostic", h.Admin.Account.DiagnoseCodexModels)
+		accounts.PUT("/:id/codex-ticket-participation", h.Admin.Account.SetCodexTicketParticipation)
 		accounts.GET("/:id/claude/reset-credits", h.Admin.Account.ClaudeResetCredits)
 		// Same protection as the Codex reset-quota route (admin auth, audit, compliance guard).
 		accounts.POST("/:id/claude/reset-credits/redeem", h.Admin.Account.RedeemClaudeResetCredit)
@@ -526,6 +556,8 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth
 	{
 		proxies.GET("", h.Admin.Proxy.List)
 		proxies.GET("/all", h.Admin.Proxy.GetAll)
+		proxies.GET("/codex-ticket-pool", h.Admin.Proxy.GetCodexTicketPool)
+		proxies.PUT("/codex-ticket-pool", h.Admin.Proxy.UpdateCodexTicketPool)
 		// 代理导出泄露账号密码原文——要求 step-up 2FA
 		proxies.GET("/data", gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.ExportData)
 		proxies.POST("/data", h.Admin.Proxy.ImportData)
@@ -675,11 +707,11 @@ func registerSystemRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	system := admin.Group("/system")
 	{
 		system.GET("/version", h.Admin.System.GetVersion)
-		system.GET("/check-updates", h.Admin.System.CheckUpdates)
-		system.GET("/rollback-versions", h.Admin.System.GetRollbackVersions)
-		system.POST("/update", h.Admin.System.PerformUpdate)
-		system.POST("/rollback", h.Admin.System.Rollback)
-		system.POST("/restart", h.Admin.System.RestartService)
+		system.GET("/check-updates", h.Admin.System.SelfUpdateDisabled)
+		system.GET("/rollback-versions", h.Admin.System.SelfUpdateDisabled)
+		system.POST("/update", h.Admin.System.SelfUpdateDisabled)
+		system.POST("/rollback", h.Admin.System.SelfUpdateDisabled)
+		system.POST("/restart", h.Admin.System.SelfUpdateDisabled)
 	}
 }
 

@@ -325,3 +325,77 @@ func TestOpenAIResponsesWebSocketV2PassthroughNonCyberTurnAllowsFollowup(t *test
 		t.Fatal("non-cyber follow-up did not reach upstream")
 	}
 }
+
+func TestOpenAIResponsesWebSocket_CyberBillingHoldsInflightAfterSessionReturns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamDone := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(upstreamDone)
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+		if err != nil {
+			t.Errorf("accept upstream websocket: %v", err)
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Errorf("read upstream turn: %v", err)
+			return
+		}
+		// A provider can emit a billable cyber error and then drop the WS
+		// without the authoritative response.failed terminal. ctx_pool records
+		// the mark/usage before propagating that interrupted-turn error.
+		cyberError := []byte(`{"type":"error","error":{"code":"cyber_policy","message":"blocked by upstream policy"},"usage":{"input_tokens":11,"output_tokens":3}}`)
+		if err := conn.Write(ctx, coderws.MessageText, cyberError); err != nil {
+			t.Errorf("write upstream cyber error: %v", err)
+			return
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	f := newCyberInflightHandlerFixture(t, upstream.URL, nil)
+	handlerDone := make(chan struct{})
+	router := gin.New()
+	router.GET("/openai/v1/responses", func(c *gin.Context) {
+		c.Header("X-Request-Id", "req-ws-cyber-inflight")
+		c.Set(string(middleware.ContextKeyAPIKey), f.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: f.apiKey.User.ID, Concurrency: 1})
+		f.handler.ResponsesWebSocket(c)
+		close(handlerDone)
+	})
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/openai/v1/responses", nil)
+	cancel()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.CloseNow() })
+	ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	err = client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"test"}`))
+	cancel()
+	require.NoError(t, err)
+	ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	_, event, err := client.Read(ctx)
+	cancel()
+	require.NoError(t, err)
+	require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+	require.Equal(t, "cyber_policy", gjson.GetBytes(event, "error.code").String())
+
+	// The interrupted turn takes raw RecordCyberPolicyUsageLog, not the
+	// normal successful-turn mandatory task. Its real DB commit stays blocked
+	// while the WS handler exits.
+	f.assertBillingStarted(t)
+	_ = client.CloseNow()
+	select {
+	case <-handlerDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("websocket handler did not return while cyber billing was blocked")
+	}
+	select {
+	case <-upstreamDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream websocket did not close")
+	}
+	f.assertBillingHeldAfterHandlerReturns(t)
+	f.assertBillingCommitReleasesHold(t)
+}

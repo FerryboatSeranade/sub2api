@@ -5,6 +5,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -28,6 +29,8 @@ import (
 
 func TestAPIContracts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	defaultCodexProbeTemplateJSON, err := json.Marshal(service.DefaultCodexProbeTemplate())
+	require.NoError(t, err)
 
 	tests := []struct {
 		name       string

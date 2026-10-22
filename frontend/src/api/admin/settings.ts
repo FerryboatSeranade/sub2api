@@ -31,6 +31,14 @@ export interface PlatformQuotaLimits {
   monthly: number | null
 }
 
+/** 自动降智检测运行器配置（默认关闭；interval/block 单位为分钟） */
+export interface CodexAutoDegradationCheckSettings {
+  enabled: boolean;
+  interval_minutes: number;
+  block_minutes: number;
+  models: string[];
+}
+
 /** 全平台默认限额 map（key = PlatformType） */
 export type DefaultPlatformQuotasMap = Partial<Record<PlatformType, PlatformQuotaLimits>>
 
@@ -644,12 +652,17 @@ export interface SystemSettings {
   openai_codex_client_version: string;
   openai_codex_client_version_synced: string;
   openai_codex_version_auto_sync_enabled: boolean;
-  openai_codex_ticket_enabled: boolean;
-  openai_codex_ticket_harvest_proxy_url: string;
-  openai_codex_ticket_harvest_proxy_configured: boolean;
   claude_code_client_version: string;
   claude_code_client_version_synced: string;
   claude_code_version_auto_sync_enabled: boolean;
+  openai_codex_ticket_enabled: boolean;
+  openai_codex_ticket_allow_without_ticket: boolean;
+  openai_codex_ticket_prompt_template: string;
+  openai_codex_ticket_prompt_template_default: string;
+  openai_codex_ticket_harvest_proxy_url: string;
+  openai_codex_ticket_harvest_proxy_configured: boolean;
+  // 自动降智检测运行器配置（默认关闭）
+  codex_auto_degradation_check: CodexAutoDegradationCheckSettings;
   // codex_cli_only 加固
   min_codex_version: string;
   max_codex_version: string;
@@ -974,10 +987,14 @@ export interface UpdateSettingsRequest {
   openai_codex_user_agent?: string;
   openai_codex_client_version?: string;
   openai_codex_version_auto_sync_enabled?: boolean;
-  openai_codex_ticket_enabled?: boolean;
-  openai_codex_ticket_harvest_proxy_url?: string;
   claude_code_client_version?: string;
   claude_code_version_auto_sync_enabled?: boolean;
+  openai_codex_ticket_enabled?: boolean;
+  openai_codex_ticket_allow_without_ticket?: boolean;
+  openai_codex_ticket_prompt_template?: string;
+  openai_codex_ticket_harvest_proxy_url?: string;
+  // 自动降智检测（整体替换；省略 = 不修改）
+  codex_auto_degradation_check?: CodexAutoDegradationCheckSettings;
   // codex_cli_only 加固
   min_codex_version?: string;
   max_codex_version?: string;

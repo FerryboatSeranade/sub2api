@@ -1,19 +1,49 @@
 package handler
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
 const validSystemOneHandlerBody = `{"model":"jev-latest","state":"sample","questions":{"q":{"type":"noul","instructions":"Evaluate"}}}`
+
+func systemOneAuditDatabase(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(os.Getenv("DATA_DIR"), "audit-metadata.db"))
+	require.NoError(t, err)
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	for _, statement := range []string{
+		`PRAGMA foreign_keys=ON`,
+		`CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT, email TEXT)`,
+		`CREATE TABLE user_request_audit_conversations(id INTEGER PRIMARY KEY, user_id BIGINT NOT NULL, api_key_id BIGINT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, expires_at TIMESTAMP NOT NULL, request_count INTEGER NOT NULL, summary JSON NOT NULL)`,
+		`CREATE TABLE user_request_audit_request_index(id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id BIGINT REFERENCES user_request_audit_conversations(id) ON DELETE CASCADE, logical_key TEXT NOT NULL, created_at TIMESTAMP NOT NULL, metadata JSON NOT NULL, request_path TEXT NOT NULL DEFAULT '', response_path TEXT NOT NULL DEFAULT '', payload_bytes BIGINT NOT NULL DEFAULT 0, proof JSON NOT NULL DEFAULT '{}', request_parent_id BIGINT REFERENCES user_request_audit_request_index(id), request_prefix_bytes BIGINT NOT NULL DEFAULT 0, request_bytes BIGINT NOT NULL DEFAULT 0, request_sha256 TEXT NOT NULL DEFAULT '')`,
+		`CREATE UNIQUE INDEX audit_logical_key ON user_request_audit_request_index(logical_key) WHERE logical_key<>''`,
+		`CREATE TABLE user_request_audit_writer_lock(id INTEGER PRIMARY KEY, version INTEGER NOT NULL)`,
+		`INSERT INTO user_request_audit_writer_lock VALUES(1,0)`,
+		`CREATE TABLE user_request_audit_payloads(request_id BIGINT NOT NULL REFERENCES user_request_audit_request_index(id) ON DELETE CASCADE, relative_path TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('request','response')), byte_size BIGINT NOT NULL, ordinal INTEGER NOT NULL, UNIQUE(request_id,ordinal))`,
+		`CREATE TABLE user_request_audit_payload_gc(relative_path TEXT PRIMARY KEY)`,
+	} {
+		_, err := db.Exec(statement)
+		require.NoError(t, err)
+	}
+	return db
+}
 
 func newSystemOneHandlerContext(body string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
@@ -106,4 +136,124 @@ func TestTypeSafeGroupsRejectNonSystemOneProtocolsBeforeScheduling(t *testing.T)
 			require.Contains(t, recorder.Body.String(), systemOneOnlyPlatformMessage)
 		})
 	}
+}
+
+func TestSystemOneAuditNativeEvidenceAndGroupSelection(t *testing.T) {
+	const requestBody = `{"model":"jev-latest","state":{"text":"keep  two\nlines","turn":9007199254740993,"items":[true,{"nested":"state"}]},"questions":{"pick":{"type":"choice","instructions":"Choose","criteria":{"a":"A","b":"B"}}},"instructions":"provider extension must not replace native state"}`
+	const responseBody = "{\n\"model\":\"jev-1.13.0\",\n\"answers\":{\"pick\":{\"type\":\"choice\",\"choice\":\"b\"}},\n\"usage\":{\"input_tokens\":123,\"output_tokens\":\"7\",\"provider_units\":0.5},\n\"provider_extension\":{\"kept\":true}\n}"
+	for _, tc := range []struct {
+		name     string
+		groupIDs string
+		groupID  int64
+		captured bool
+	}{
+		{name: "selected", groupIDs: "[3]", groupID: 3, captured: true},
+		{name: "unselected", groupIDs: "[3]", groupID: 4},
+		{name: "missing selection", groupID: 3},
+		{name: "invalid selection", groupIDs: "[3,-1]", groupID: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DATA_DIR", t.TempDir())
+			db := systemOneAuditDatabase(t)
+			archive := repository.NewFileUserRequestAuditRepository(db)
+			settings := &contentModerationHandlerSettingRepo{values: map[string]string{
+				service.SettingKeyUserRequestAuditGroupIDs: tc.groupIDs,
+			}}
+			svc := service.NewUserRequestAuditService(archive, settings)
+			t.Cleanup(svc.Stop)
+			apiKey := &service.APIKey{ID: 4, UserID: 5, GroupID: &tc.groupID, Group: &service.Group{ID: tc.groupID, Name: "TypeSafe", Platform: service.PlatformTypeSafe}}
+			router := gin.New()
+			router.POST("/v1/systemone", func(c *gin.Context) {
+				body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1 << 20}})
+				require.NoError(t, err)
+				recorder := beginUserRequestAudit(c, svc, service.ContentModerationProtocolTypeSafeSystemOne, endpointForAudit(c, "/v1/systemone"), "jev-latest", body, apiKey, 5)
+				defer func() { recorder.Finish(c.Writer.Status(), nil, nil) }()
+				c.Data(http.StatusOK, "application/json", []byte(responseBody))
+			})
+			result := httptest.NewRecorder()
+			router.ServeHTTP(result, httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(requestBody)))
+			require.Equal(t, http.StatusOK, result.Code)
+			require.Equal(t, responseBody, result.Body.String(), "auditing must not alter native wire bytes")
+			svc.Stop() // Drain create/completion before inspecting the real archive.
+			rows, total, err := svc.List(context.Background(), service.UserRequestAuditFilter{Protocol: service.ContentModerationProtocolTypeSafeSystemOne})
+			require.NoError(t, err)
+			if !tc.captured {
+				require.Zero(t, total)
+				require.Empty(t, rows)
+				_, err := os.ReadDir(archive.UserRequestAuditRoot())
+				require.True(t, os.IsNotExist(err), "disabled capture must not create archive files")
+				return
+			}
+			require.EqualValues(t, 1, total)
+			require.Len(t, rows, 1)
+			record, err := svc.GetByID(context.Background(), rows[0].ID)
+			require.NoError(t, err)
+			require.Equal(t, "completed", record.Status)
+			require.Equal(t, "/v1/systemone", record.Endpoint)
+			require.Equal(t, "jev-latest", record.RequestedModel)
+			require.Equal(t, "jev-1.13.0", record.UpstreamModel)
+			require.JSONEq(t, requestBody, record.RequestChatML)
+			require.Contains(t, record.RequestChatML, "9007199254740993", "native numbers must not lose precision")
+			require.Equal(t, responseBody, record.ResponseChatML)
+			require.NotContains(t, record.RequestChatML, "<|im_start|>")
+			require.NotContains(t, record.ResponseChatML, "<|assistant|>")
+			require.Equal(t, float64(123), record.InputUsage["input_tokens"])
+			require.Equal(t, "7", record.OutputUsage["output_tokens"], "preserve upstream usage types")
+			_, total, err = svc.List(context.Background(), service.UserRequestAuditFilter{Protocol: service.ContentModerationProtocolOpenAIResponses})
+			require.NoError(t, err)
+			require.Zero(t, total, "native records must not appear under a chat protocol")
+			reopened := repository.NewFileUserRequestAuditRepository(db)
+			persisted, err := reopened.GetByID(context.Background(), record.ID)
+			require.NoError(t, err)
+			require.Equal(t, record.RequestChatML, persisted.RequestChatML)
+			require.Equal(t, responseBody, persisted.ResponseChatML)
+			require.Equal(t, record.InputUsage, persisted.InputUsage)
+			require.Equal(t, record.OutputUsage, persisted.OutputUsage)
+		})
+	}
+}
+
+func TestSystemOneAuditCapturesModerationDenialBeforeForward(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	moderationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/moderations", r.URL.Path)
+		_, _ = w.Write([]byte(`{"results":[{"category_scores":{"sexual":0.9}}]}`))
+	}))
+	defer moderationServer.Close()
+	moderationConfig, err := json.Marshal(&service.ContentModerationConfig{
+		Enabled: true, Mode: service.ContentModerationModePreBlock,
+		BaseURL: moderationServer.URL, Model: "omni-moderation-latest",
+		APIKeys: []string{"sk-test"}, SampleRate: 100, AllGroups: true, BlockMessage: "native request denied",
+	})
+	require.NoError(t, err)
+	settings := &contentModerationHandlerSettingRepo{values: map[string]string{
+		service.SettingKeyRiskControlEnabled:       "true",
+		service.SettingKeyContentModerationConfig:  string(moderationConfig),
+		service.SettingKeyUserRequestAuditGroupIDs: "[9]",
+	}}
+	archive := repository.NewFileUserRequestAuditRepository(systemOneAuditDatabase(t))
+	svc := service.NewUserRequestAuditService(archive, settings)
+	t.Cleanup(svc.Stop)
+	moderationSvc := service.NewContentModerationService(settings, &contentModerationHandlerTestRepo{}, nil, nil, nil, nil, nil, nil)
+	h := &GatewayHandler{
+		cfg:                      &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1 << 20}},
+		contentModerationService: moderationSvc,
+		userRequestAuditService:  svc,
+	}
+	c, result := newTypeSafeGroupContext(t, "/v1/systemone", validSystemOneHandlerBody, service.PlatformTypeSafe)
+	h.SystemOne(c)
+	require.GreaterOrEqual(t, result.Code, 400)
+	require.Contains(t, result.Body.String(), "native request denied")
+	svc.Stop()
+	rows, total, err := svc.List(context.Background(), service.UserRequestAuditFilter{Protocol: service.ContentModerationProtocolTypeSafeSystemOne})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, rows, 1)
+	record, err := svc.GetByID(context.Background(), rows[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, "failed", record.Status)
+	require.JSONEq(t, validSystemOneHandlerBody, record.RequestChatML)
+	require.Equal(t, result.Body.String(), record.ResponseChatML)
+	require.Nil(t, record.InputUsage)
+	require.Nil(t, record.OutputUsage)
 }
