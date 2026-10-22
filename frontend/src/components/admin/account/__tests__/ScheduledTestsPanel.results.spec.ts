@@ -95,4 +95,16 @@ describe('scheduled test result selection', () => {
     expect(wrapper.find('svg').exists()).toBe(false)
   })
 
+  it('offers Astra with a stale catalog and preserves the saved model while editing', async () => {
+    listByAccount.mockResolvedValue([{ id: 1, model_id: 'gpt-6-astra', test_kind: 'pelican_svg_v1', enabled: true, cron_expression: '15 4 * * *', max_results: 30 }])
+    const wrapper = await openPanel()
+    await wrapper.find('button[title="admin.scheduledTests.editPlan"]').trigger('click')
+    await flushPromises()
+    const selects = wrapper.findAllComponents({ name: 'Select' })
+    const model = selects.find(s => s.props('modelValue') === 'gpt-6-astra')
+    expect(model).toBeDefined()
+    expect(model!.props('options')).toEqual(expect.arrayContaining([{ value: 'gpt-6-astra', label: 'gpt-6-astra' }, { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol' }]))
+    expect(model!.props('creatable')).toBe(true)
+  })
+
 })

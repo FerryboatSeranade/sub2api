@@ -1,5 +1,6 @@
 export default {
     scheduledTests: {
+      useModelId: 'Use model ID',
       pelicanProbe: 'Pelican bicycle SVG (auxiliary)',
       pelicanHelp: 'Checks SVG syntax, canvas, shape count and candidate wheels; retains the drawing for review. Structure scores do not measure visual quality or intelligence and never affect auto-exclusion. OpenAI accounts only.',
       pelicanScore: 'Structure score',

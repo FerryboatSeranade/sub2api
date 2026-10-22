@@ -42,9 +42,11 @@
             <Input v-if="newPlan.test_kind === 'candy_v1'" model-value="gpt-6.1-sol" disabled />
             <Select v-else
               v-model="newPlan.model_id"
-              :options="modelOptions"
+              :options="testModelOptions(newPlan.test_kind, newPlan.model_id)"
               :placeholder="t('admin.scheduledTests.model')"
-              :searchable="modelOptions.length > 5"
+              :searchable="true"
+              :creatable="true"
+              :creatable-prefix="t('admin.scheduledTests.useModelId')"
             />
           </div>
           <div>
@@ -264,9 +266,11 @@
                 <Input v-if="editForm.test_kind === 'candy_v1'" model-value="gpt-6.1-sol" disabled />
             <Select v-else
               v-model="editForm.model_id"
-                  :options="modelOptions"
+                  :options="testModelOptions(editForm.test_kind, editForm.model_id)"
                   :placeholder="t('admin.scheduledTests.model')"
-                  :searchable="modelOptions.length > 5"
+                  :searchable="true"
+              :creatable="true"
+              :creatable-prefix="t('admin.scheduledTests.useModelId')"
                 />
               </div>
               <div>
@@ -530,6 +534,18 @@ const testKindOptions = computed(() => [
   { value: 'candy_v1', label: t('admin.scheduledTests.candyProbe') },
   { value: 'pelican_svg_v1', label: t('admin.scheduledTests.pelicanProbe') }
 ])
+// Catalogs may lag behind working upstream model IDs. Preserve saved values
+// and offer explicit direct-probe presets without changing account routing.
+const testModelOptions = (kind: string, current: string): SelectOption[] => {
+  const options = [...props.modelOptions]
+  const ids = new Set(options.map(option => option.value))
+  const candidates = kind === 'pelican_svg_v1' ? ['gpt-6.1-sol', 'gpt-6-astra', current] : [current]
+  for (const id of candidates) {
+    if (id && !ids.has(id)) { options.push({ value: id, label: id }); ids.add(id) }
+  }
+  return options
+}
+
 const runningPlanIds = reactive(new Set<number>())
 const handleRun = async (plan: ScheduledTestPlan) => {
   const accountId = props.accountId
@@ -595,7 +611,7 @@ const resetNewPlan = () => {
 for (const form of [newPlan, editForm]) {
   watch(() => form.test_kind, (kind) => {
     if (kind === 'candy_v1' || kind === 'pelican_svg_v1') {
-      form.model_id = 'gpt-6.1-sol'
+      if (kind === 'candy_v1' || !form.model_id) form.model_id = 'gpt-6.1-sol'
       form.auto_recover = false
       if (!form.cron_expression) form.cron_expression = '0 3 * * *'
     }

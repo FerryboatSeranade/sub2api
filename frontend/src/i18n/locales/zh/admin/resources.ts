@@ -1,5 +1,6 @@
 export default {
     scheduledTests: {
+      useModelId: '使用模型 ID',
       pelicanProbe: '鹈鹕骑自行车 SVG（辅助）',
       pelicanHelp: '自动检查 SVG 格式、画布、图形数量和候选车轮，保存原图供复核。结构分不代表绘画质量或模型智力，不参与降智自动排除。仅支持 OpenAI 账号。',
       pelicanScore: '结构检查分',
