@@ -360,8 +360,14 @@ func (s *ScheduledTestService) probeActionOne(ctx context.Context, id int64, a P
 		if err != nil {
 			return err
 		}
+		wanted := &ScheduledTestPlan{TestKind: a.Kind, ModelID: a.Model}
+		if a.Action == "schedule" {
+			if err := validateScheduledTestKind(wanted); err != nil {
+				return err
+			}
+		}
 		for _, p := range plans {
-			if p.TestKind == a.Kind {
+			if p.TestKind == a.Kind && (a.Action == "disable" || p.ModelID == wanted.ModelID) {
 				if a.Action == "disable" {
 					p.Enabled = false
 				} else {

@@ -30,7 +30,7 @@
     <div class="flex flex-wrap gap-2 items-center">
      <input v-model="model" class="input w-44" aria-label="计划模型" placeholder="gpt-6.1-sol" :disabled="busy || kind==='candy_v1'" />
      <input v-model="cron" class="input w-36" aria-label="批量计划 Cron" placeholder="15 4 * * *" :disabled="busy" />
-     <button class="btn btn-secondary" :disabled="busy || !selected.size" title="为当前检测类型创建计划；已有同类型计划则更新，不重复创建" @click="prepare('schedule')">批量设置计划</button>
+     <button class="btn btn-secondary" :disabled="busy || !selected.size" title="为当前检测类型创建计划；已有同类型同模型计划则更新，不重复创建" @click="prepare('schedule')">批量设置计划</button>
      <button class="btn btn-secondary" :disabled="busy || !selected.size" title="禁用所选账号当前类型的全部计划，保留历史" @click="prepare('disable')">禁用计划</button>
      <button class="btn btn-secondary" :disabled="busy || !selected.size" title="排除账号所有检测，优先于计划启用状态" @click="prepare('exclude')">排除检测</button>
      <button class="btn btn-secondary" :disabled="busy || !selected.size" title="取消账号级排除；全局 VM 排除和异常暂停仍有效" @click="prepare('include')">取消账号排除</button>
@@ -118,7 +118,7 @@ function toggle(id:number){selected.has(id)?selected.delete(id):selected.add(id)
 function selectFiltered(){selected.clear();filtered.value.filter(i=>!i.deleted).forEach(i=>selected.add(i.account_id))}
 function prepare(action:string,ids?:number[]){pending.value={action,ids:ids||Array.from(selected)};note.value=''}
 async function saveSettings(){busy.value=true;try{settings.value=await api.saveSettings(settings.value);app.showSuccess('检测设置已保存')}catch(e:any){app.showError(e.message)}finally{busy.value=false}}
-async function runOne(i:Item){if(gate(i)){return '#'+i.account_id+' 跳过：'+gate(i)}let plan=i.plans[0];if(!plan)plan=await scheduledTestsAPI.create({account_id:i.account_id,test_kind:kind.value,model_id:model.value,cron_expression:cron.value,enabled:false,max_results:50});const r=await scheduledTestsAPI.runNow(plan.id);i.result=r;return '#'+i.account_id+' '+(r.status==='success'?'完成':'调用异常（不重试）')}
+async function runOne(i:Item){if(gate(i)){return '#'+i.account_id+' 跳过：'+gate(i)}let plan=i.plans.find(p=>p.model_id===model.value);if(!plan)plan=await scheduledTestsAPI.create({account_id:i.account_id,test_kind:kind.value,model_id:model.value,cron_expression:cron.value,enabled:false,max_results:50});const r=await scheduledTestsAPI.runNow(plan.id);i.result=r;return '#'+i.account_id+' '+(r.status==='success'?'完成':'调用异常（不重试）')}
 async function transfer(i:Item){if(i.vm_state!=='not_linked'||i.account_type!=='oauth'||i.deleted)return '#'+i.account_id+' 跳过：已关联或非 OAuth 账号'
  let state=await getVMBridge(i.account_id)
  if(!state.enabled)throw new Error('VM2API 尚未配置')
