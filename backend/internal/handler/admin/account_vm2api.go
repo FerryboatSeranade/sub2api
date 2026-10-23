@@ -52,3 +52,24 @@ func (h *AccountHandler) VM2APISync(c *gin.Context) {
 	}
 	response.Success(c, st)
 }
+
+// Quota routes belong to the administrator group; no management credentials reach clients.
+func (h *AccountHandler) VM2APIUsage(c *gin.Context)        { h.vmQuota(c, false) }
+func (h *AccountHandler) VM2APIUsageRefresh(c *gin.Context) { h.vmQuota(c, true) }
+func (h *AccountHandler) vmQuota(c *gin.Context, force bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		response.BadRequest(c, "invalid account id")
+		return
+	}
+	if h.vm2apiBridge == nil || !h.vm2apiBridge.Enabled() {
+		response.BadRequest(c, "vm2api 集成尚未配置")
+		return
+	}
+	status, err := h.vm2apiBridge.Quota(c.Request.Context(), id, force)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, status)
+}

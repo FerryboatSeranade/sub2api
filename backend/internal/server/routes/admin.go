@@ -403,6 +403,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/claude/reset-credits/redeem", h.Admin.Account.RedeemClaudeResetCredit)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/:id/duplicate", h.Admin.Account.Duplicate)
+		accounts.GET("/:id/vm2api/usage", h.Admin.Account.VM2APIUsage)
+		accounts.POST("/:id/vm2api/usage/refresh", h.Admin.Account.VM2APIUsageRefresh)
 		accounts.GET("/:id/vm2api", h.Admin.Account.VM2APIStatus)
 		accounts.POST("/:id/vm2api", h.Admin.Account.VM2APISync)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)

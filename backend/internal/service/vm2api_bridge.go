@@ -18,7 +18,10 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const vmBridgeLock int64 = 7318999999999998
@@ -58,6 +61,14 @@ type vmBridgeVM struct {
 	MaxConcurrency int    `json:"max_concurrency"`
 }
 type VM2APIBridge struct {
+	quotaMu                                    sync.Mutex
+	quotaItems                                 map[string]VMQuotaStatus
+	quotaUntil                                 time.Time
+	quotaError                                 string
+	quotaRefresh                               singleflight.Group
+	quotaAttempts                              map[string]VMQuotaStatus
+	quotaOnce                                  sync.Once
+	quotaSlots                                 chan struct{}
 	db                                         *sql.DB
 	admin                                      AdminService
 	base, apiBase, master, group, proxy, model string

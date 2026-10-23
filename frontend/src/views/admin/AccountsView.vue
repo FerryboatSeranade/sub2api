@@ -339,6 +339,7 @@
             </div>
           </template>
           <template #cell-usage="{ row }">
+            <VM2APIUsage v-if="row.extra?.vm2api_vm_id" :account-id="row.id" :refresh-token="usageManualRefreshToken" />
             <AccountUsageCell
               :account="row"
               :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
@@ -610,6 +611,7 @@ const showReasoningOverview = ref(false)
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
+import VM2APIUsage from '@/components/account/VM2APIUsage.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
