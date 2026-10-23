@@ -5,6 +5,7 @@
    <div class="flex flex-wrap items-center gap-3 rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
     <label>检测并发 <input v-model.number="settings.concurrency" type="number" min="1" max="32" class="input w-20" aria-label="检测并发" :disabled="busy" /></label>
     <label class="flex items-center gap-2"><input v-model="settings.exclude_vm" type="checkbox" :disabled="busy" />排除所有 vm2api 衍生账号检测</label>
+      <label class="flex items-center gap-2" title="仅排除已有 vm2api 衍生账号的原生账号；手动与定时检测均跳过，已有计划保留。与衍生账号开关独立。"><input v-model="settings.exclude_vm_source" type="checkbox" :disabled="busy" />排除已转为 vm2api 的原生账号检测</label>
     <button class="btn btn-secondary" :disabled="busy" title="保存手动与定时检测共同使用的并发和排除规则" @click="saveSettings">保存检测设置</button>
     <p class="w-full text-xs text-gray-500">默认并发 10，可设 1–32；与单账号 / VM / Key 的 2 并发不同。排除检测会覆盖已有定时计划，计划与历史仍保留；不会停止正常 API 调度。取消排除后按计划继续。</p>
    </div>
@@ -99,7 +100,7 @@ import { formatDateTime } from '@/utils/format'
 const props=defineProps<{show:boolean}>();const emit=defineEmits<{(e:'close'):void}>();const app=useAppStore()
 const items=ref<Item[]>([]),loading=ref(false),busy=ref(false),stopQueued=ref(false),search=ref(''),stateFilter=ref(''),vmFilter=ref(''),errorFilter=ref('')
 const kind=ref<'candy_v1'|'pelican_svg_v1'>('candy_v1'),model=ref('gpt-6.1-sol'),cron=ref('15 4 * * *'),note=ref(''),progress=ref('')
-const settings=ref<ProbeSettings>({concurrency:10,exclude_vm:false});const selected=reactive(new Set<number>())
+const settings=ref<ProbeSettings>({concurrency:10,exclude_vm:false,exclude_vm_source:false});const selected=reactive(new Set<number>())
 const pending=ref<{action:string;ids:number[]}|null>(null),reviewing=ref<Item|null>(null),reviewNote=ref(''),reviewVerdict=ref('not_degraded')
 const labels:Record<string,string>={not_degraded:'不降智',degraded:'降智',inconclusive:'检测异常 / 无法判定',not_tested:'尚未检测',structural_pass:'SVG 结构通过 / 待人工审核',invalid_svg:'SVG 结构异常 / 待人工审核'}
 const vmLabels={not_linked:'尚未转入 VM',linked:'原账号已关联 VM',derived:'VM 衍生账号'}
@@ -107,7 +108,7 @@ const actionLabels:Record<string,string>={run:'检测所选',vm:'转入 VM2API',
 function verdict(i:Item){return i.review?.verdict || (i.failure?'inconclusive':i.result?.quality?.verdict || (i.result?.pelican ? (i.result.pelican.verdict==='reference_only' || i.result.pelican.verdict==='structural_pass'?'structural_pass':i.result.pelican.verdict==='inconclusive'?'inconclusive':'invalid_svg') : 'not_tested'))}
 const filtered=computed(()=>items.value.filter(i=>(!stateFilter.value||verdict(i)===stateFilter.value)&&(!vmFilter.value||i.vm_state===vmFilter.value)&&(!errorFilter.value||i.failure?.code===errorFilter.value)&&`${i.account_id} ${i.account_name} ${i.result?.error_message||''}`.toLowerCase().includes(search.value.toLowerCase())))
 const failures=computed(()=>Array.from(new Map(items.value.flatMap(i=>i.failure?[[i.failure.code,i.failure] as const]:[])).values()))
-function gate(i:Item){if(i.deleted)return '账号已删除';if(i.control.excluded)return '账号已排除检测：'+(i.control.note||'未填写备注');if(settings.value.exclude_vm&&i.vm_state==='derived')return '全局设置已排除 VM 衍生账号';if(i.control.pause_code&&(!i.control.pause_until||Date.parse(i.control.pause_until)>Date.now()))return i.control.pause_until?'异常退避至 '+formatDateTime(i.control.pause_until):'异常暂停，修复后需手动恢复检测';return ''}
+function gate(i:Item){if(i.deleted)return '账号已删除';if(i.control.excluded)return '账号已排除检测：'+(i.control.note||'未填写备注');if(settings.value.exclude_vm&&i.vm_state==='derived')return '全局设置已排除 VM 衍生账号';if(settings.value.exclude_vm_source&&i.vm_state==='linked')return '已全局排除已转为 vm2api 的原生账号检测（已有计划不执行）';if(i.control.pause_code&&(!i.control.pause_until||Date.parse(i.control.pause_until)>Date.now()))return i.control.pause_until?'异常退避至 '+formatDateTime(i.control.pause_until):'异常暂停，修复后需手动恢复检测';return ''}
 let generation=0
 async function load(){const g=++generation;loading.value=true;try{const [data,config]=await Promise.all([api.list(kind.value),api.settings()]);if(g===generation){items.value=data;settings.value=config}}catch(e:any){app.showError(e.message)}finally{if(g===generation)loading.value=false}}
 watch(()=>props.show,v=>{if(v)void load();else{generation++;stopQueued.value=true;pending.value=null}})

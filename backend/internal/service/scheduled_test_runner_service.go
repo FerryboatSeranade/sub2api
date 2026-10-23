@@ -239,7 +239,7 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 	}
 
 	if s.scheduledSvc.db != nil {
-		if control, _, e := s.scheduledSvc.probeControl(ctx, plan.AccountID); e == nil && control.PauseUntil != nil && control.PauseUntil.After(nextRun) {
+		if control, _, _, e := s.scheduledSvc.probeControl(ctx, plan.AccountID); e == nil && control.PauseUntil != nil && control.PauseUntil.After(nextRun) {
 			nextRun = *control.PauseUntil
 		}
 	}

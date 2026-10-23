@@ -128,7 +128,7 @@ export interface ProbeManagementItem {
  plans: ScheduledTestPlan[]; result: ScheduledTestResult | null
  failure?: { code: string; label: string; advice: string; permanent: boolean; delay_seconds: number }
 }
-export interface ProbeSettings { concurrency: number; exclude_vm: boolean }
+export interface ProbeSettings { concurrency: number; exclude_vm: boolean; exclude_vm_source: boolean }
 export const probeManagementAPI = {
  list: async (kind: string) => (await apiClient.get<ProbeManagementItem[]>('/admin/scheduled-test-plans/management', { params: { kind } })).data,
  settings: async () => (await apiClient.get<ProbeSettings>('/admin/scheduled-test-plans/probe-settings')).data,

@@ -78,8 +78,9 @@ type ProbeManagementItem struct {
 	Failure     *ProbeFailure        `json:"failure,omitempty"`
 }
 type ProbeSettings struct {
-	Concurrency int  `json:"concurrency"`
-	ExcludeVM   bool `json:"exclude_vm"`
+	Concurrency     int  `json:"concurrency"`
+	ExcludeVM       bool `json:"exclude_vm"`
+	ExcludeVMSource bool `json:"exclude_vm_source"`
 }
 
 func (s *ScheduledTestService) ProbeSettings(ctx context.Context) (ProbeSettings, error) {
@@ -179,22 +180,27 @@ func (s *ScheduledTestService) probeExtra(ctx context.Context, id int64, key str
 	}
 	return nil
 }
-func (s *ScheduledTestService) probeControl(ctx context.Context, id int64) (ProbeControl, bool, error) {
+func (s *ScheduledTestService) probeControl(ctx context.Context, id int64) (ProbeControl, bool, bool, error) {
 	var raw []byte
 	var derived bool
+	var bridgeRaw []byte
 	var c ProbeControl
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(extra->'probe_control','{}'),COALESCE(extra ? 'vm2api_source_id',false) FROM accounts WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&raw, &derived)
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(extra->'probe_control','{}'),COALESCE(extra ? 'vm2api_source_id',false),COALESCE(extra->'vm2api_bridge','{}') FROM accounts WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&raw, &derived, &bridgeRaw)
 	if err != nil {
-		return c, false, err
+		return c, false, false, err
 	}
 	err = json.Unmarshal(raw, &c)
-	return c, derived, err
+	var bridge VMBridgeState
+	if e := json.Unmarshal(bridgeRaw, &bridge); e != nil {
+		return c, derived, false, e
+	}
+	return c, derived, !derived && bridge.TargetID > 0, err
 }
 func (s *ScheduledTestService) ProbeGate(ctx context.Context, id int64, manual bool) error {
 	if s.db == nil {
 		return nil
 	}
-	c, vm, err := s.probeControl(ctx, id)
+	c, vm, source, err := s.probeControl(ctx, id)
 	if err != nil {
 		return fmt.Errorf("账号已删除或无法读取：%w", err)
 	}
@@ -208,6 +214,9 @@ func (s *ScheduledTestService) ProbeGate(ctx context.Context, id int64, manual b
 	if settings.ExcludeVM && vm {
 		return fmt.Errorf("已全局排除 vm2api 衍生账号检测；已有计划不执行")
 	}
+	if settings.ExcludeVMSource && source {
+		return fmt.Errorf("已全局排除已转为 vm2api 的原生账号检测；已有计划不执行")
+	}
 	if !manual && c.PauseCode != "" && (c.PauseUntil == nil || c.PauseUntil.After(time.Now())) {
 		return fmt.Errorf("检测暂停：%s", c.PauseCode)
 	}
@@ -217,7 +226,7 @@ func (s *ScheduledTestService) RecordProbeFailure(ctx context.Context, id int64,
 	if s.db == nil {
 		return nil
 	}
-	c, _, err := s.probeControl(ctx, id)
+	c, _, _, err := s.probeControl(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -291,7 +300,7 @@ func (s *ScheduledTestService) ProbeAction(ctx context.Context, a ProbeAction) (
 	return out, nil
 }
 func (s *ScheduledTestService) probeActionOne(ctx context.Context, id int64, a ProbeAction) error {
-	c, _, err := s.probeControl(ctx, id)
+	c, _, _, err := s.probeControl(ctx, id)
 	if err != nil {
 		return fmt.Errorf("账号已删除或不存在")
 	}

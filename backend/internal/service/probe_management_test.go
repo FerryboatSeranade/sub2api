@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"github.com/DATA-DOG/go-sqlmock"
+	"strings"
 	"testing"
 )
 
@@ -47,12 +48,18 @@ func TestProbeGateHonorsExclusionAndPause(t *testing.T) {
 	for _, tc := range []struct {
 		name, control               string
 		vm, global, manual, blocked bool
+		source, excludeSource       bool
 	}{
-		{"explicit exclusion overrides manual", `{"excluded":true,"note":"VM redundant"}`, false, false, true, true},
-		{"global VM exclusion", `{}`, true, true, true, true},
-		{"permanent pause blocks schedule", `{"pause_code":"auth_invalid"}`, false, false, false, true},
-		{"explicit manual validation can retry pause", `{"pause_code":"auth_invalid"}`, false, false, true, false},
-		{"active normal account", `{}`, false, false, false, false},
+		{"explicit exclusion overrides manual", `{"excluded":true,"note":"VM redundant"}`, false, false, true, true, false, false},
+		{"global VM exclusion", `{}`, true, true, true, true, false, false},
+		{"permanent pause blocks schedule", `{"pause_code":"auth_invalid"}`, false, false, false, true, false, false},
+		{"explicit manual validation can retry pause", `{"pause_code":"auth_invalid"}`, false, false, true, false, false, false},
+		{"active normal account", `{}`, false, false, false, false, false, false},
+		{"source manual excluded", `{}`, false, false, true, true, true, true},
+		{"source scheduled excluded", `{}`, false, false, false, true, true, true},
+		{"source flag permits derived", `{}`, true, false, true, false, false, true},
+		{"source flag permits unlinked", `{}`, false, false, true, false, false, true},
+		{"derived flag permits source", `{}`, false, true, true, false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, m, err := sqlmock.New()
@@ -61,10 +68,17 @@ func TestProbeGateHonorsExclusionAndPause(t *testing.T) {
 			}
 			defer db.Close()
 			s := &ScheduledTestService{db: db}
-			m.ExpectQuery("SELECT COALESCE\\(extra").WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"control", "derived"}).AddRow(tc.control, tc.vm))
+			bridge := `{}`
+			if tc.source {
+				bridge = `{"target_id":42}`
+			}
+			m.ExpectQuery("SELECT COALESCE\\(extra").WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"control", "derived", "bridge"}).AddRow(tc.control, tc.vm, bridge))
 			config := `{"concurrency":10,"exclude_vm":false}`
 			if tc.global {
 				config = `{"concurrency":10,"exclude_vm":true}`
+			}
+			if tc.excludeSource {
+				config = strings.TrimSuffix(config, "}") + `,"exclude_vm_source":true}`
 			}
 			m.ExpectQuery("SELECT COALESCE").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(config))
 			err = s.ProbeGate(context.Background(), 1, tc.manual)
