@@ -86,7 +86,7 @@ func TestReasoningPolicyTransactionRollback(t *testing.T) {
 	mock.ExpectExec("SELECT pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT COALESCE").WithArgs(ReasoningGlobalKey).WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(true))
 	mock.ExpectExec("UPDATE accounts SET extra").WithArgs("disabled", int64(18)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE accounts SET extra").WithArgs(true, int64(18)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("WITH policy AS").WithArgs(true, int64(18)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO scheduler_outbox").WithArgs(int64(18)).WillReturnError(context.Canceled)
 	mock.ExpectRollback()
 	require.ErrorIs(t, svc.updateReasoningPolicy(context.Background(), 18, "disabled", nil, nil), context.Canceled)

@@ -3,7 +3,7 @@ export default {
  vmBridge: {"linked": "已关联 vm2api；点击更新凭证与同步计划", "plans": "同步成功时，原账号的全部定时测试计划和历史记录迁移到新账号；保留原启用状态，原账号不再执行这些计划。","title": "转入 / 同步到 vm2api", "description": "创建或更新专属容器与 Key，真实 API 测试通过后创建 vm2api 账号并关闭原账号直接调度；失败不会执行新旧账号切换。", "limits": "Sub2API 账号 2 并发 → 专属 Key 2 并发 → 专属容器 2 并发", "groups": "同时继承原账号分组", "groupsHint": "始终加入 vm2api-hz。勾选后额外加入原账号的 OpenAI 分组；已有目标账号的分组保留。", "background": "任务在后台运行，关闭窗口不会取消。重试会核对已有资源；共享入口会移除该容器，清空后停用。", "start": "确认并同步", "running": "同步进行中", "completed": "同步成功", "failed": "同步失败，可重试", "interrupted": "任务中断，可重试", "container": "容器", "target": "新账号", "unconfigured": "服务器尚未配置 vm2api 集成", "loadFailed": "读取进度失败，请刷新后再操作", "startFailed": "提交未确认，请刷新进度，避免重复操作"},
       reasoning: {
     globalSwitch: '自动排除降智账号',
-    globalHint: '跟随全局的账号使用此开关；独立启用/关闭优先。只排除最近明确判为降智的账号。',
+    globalHint: '优先模式：不降智 → 未检测/结果过期 → 降智兜底；仅并发繁忙时最多等 2 秒。48 小时前的结果过期；调用异常保留上次有效结论。凭证、额度、限流等限制始终生效，独立账号策略优先。',
     inherit: '跟随全局', alwaysEnabled: '始终排除降智', alwaysDisabled: '不自动排除',
 "column": "降智状态", "not_degraded": "不降智", "degraded": "降智", "inconclusive": "检测失败 / 无法判定", "untested": "未检测", "loadError": "状态加载失败", "notApplicable": "不适用", "autoExclude": "降智自动排除", "excluded": "已因降智排除调度", "rule": "按最近一次糖果题检测是否包含数字 21 判定，仅代表该次测试", "excludedInconclusive": "已因检测失败 / 无法判定临时排除", "policyHint": "排除最近检测降智或检测失败 / 无法判定的账号；检测恢复不降智后解除此项排除。未检测不排除，不改变手动暂停或限流状态", "saved": "自动排除设置已保存", "saveFailed": "保存失败，请重试", "recover": "强制恢复", "recoverHint": "清除本地限流及可恢复异常；上游配额不会重置，仍限流时会再次触发", "recoverConfirm": "强制恢复账号“{name}”的本地限流及可恢复异常状态？这不会恢复上游额度，也不会取消手动暂停或降智排除。"},
       bps: {

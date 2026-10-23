@@ -95,15 +95,17 @@ type OpenAIAccountScheduleRequest struct {
 }
 
 type OpenAIAccountScheduleDecision struct {
-	Layer               string
-	StickyPreviousHit   bool
-	StickySessionHit    bool
-	CandidateCount      int
-	TopK                int
-	LatencyMs           int64
-	LoadSkew            float64
-	SelectedAccountID   int64
-	SelectedAccountType string
+	ReasoningTier           int
+	ReasoningFallbackReason string
+	Layer                   string
+	StickyPreviousHit       bool
+	StickySessionHit        bool
+	CandidateCount          int
+	TopK                    int
+	LatencyMs               int64
+	LoadSkew                float64
+	SelectedAccountID       int64
+	SelectedAccountType     string
 }
 
 type OpenAIAccountSchedulerMetricsSnapshot struct {
@@ -2163,7 +2165,7 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 // zeroing out capacity. The retry re-runs the exact same selection with the
 // quarantine checks bypassed, so healthy proxies always win the first pass
 // and quarantined ones only serve when nothing else can.
-func (s *OpenAIGatewayService) selectAccountWithScheduler(
+func (s *OpenAIGatewayService) selectAccountWithoutReasoningTiers(
 	ctx context.Context,
 	groupID *int64,
 	previousResponseID string,

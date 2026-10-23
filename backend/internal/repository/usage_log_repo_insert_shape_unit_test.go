@@ -129,7 +129,7 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	})
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 
-	idx := len(prepared.args) - 4
+	idx := len(prepared.args) - 5
 	arg, ok := prepared.args[idx].(sql.NullString)
 	require.True(t, ok, "upstream_request_id arg should be sql.NullString, got %T", prepared.args[idx])
 	require.True(t, arg.Valid)
@@ -142,4 +142,13 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	require.False(t, nullArg.Valid, "absent upstream request id must be NULL")
 
 	require.Contains(t, usageLogSelectColumns, "upstream_request_id")
+}
+
+func TestPrepareUsageLogInsertReasoningRoute(t *testing.T) {
+	route := "降智兜底：优先层无可用账号"
+	p := prepareUsageLogInsert(&service.UsageLog{ReasoningRoute: &route})
+	value := p.args[len(p.args)-1].(sql.NullString)
+	require.True(t, value.Valid)
+	require.Equal(t, route, value.String)
+	require.Contains(t, usageLogSelectColumns, "reasoning_route")
 }

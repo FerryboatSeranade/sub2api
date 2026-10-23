@@ -12,10 +12,14 @@ const ReasoningLatestKey = "reasoning_latest"
 
 func reasoningSnapshot(result *ScheduledTestResult) map[string]any {
 	EvaluateReasoningProbe(result)
-	return map[string]any{ReasoningLatestKey: map[string]any{
+	snapshot := map[string]any{ReasoningLatestKey: map[string]any{
 		"verdict": result.Quality.Verdict, "checked_at": result.FinishedAt.UTC().Format(time.RFC3339Nano),
 		"model": result.ModelID, "result_id": result.ID,
 	}}
+	if result.Quality.Verdict == "not_degraded" || result.Quality.Verdict == "degraded" {
+		snapshot["reasoning_last_valid"] = snapshot[ReasoningLatestKey]
+	}
+	return snapshot
 }
 
 // This policy never changes the administrator's schedulable flag or health status.
@@ -42,7 +46,7 @@ func (s *ScheduledTestService) GetReasoningGlobal(ctx context.Context) (bool, er
 
 // All policy changes and result snapshots share a transaction lock. Materializing the
 // effective flag preserves scheduling compatibility during blue/green overlap.
-func (s *ScheduledTestService) updateReasoningPolicy(ctx context.Context, accountID int64, mode string, global *bool, snapshot map[string]any) error {
+func (s *ScheduledTestService) updateReasoningPolicy(ctx context.Context, accountID int64, mode string, global *bool, snapshot map[string]any, routing ...string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -50,6 +54,19 @@ func (s *ScheduledTestService) updateReasoningPolicy(ctx context.Context, accoun
 	defer tx.Rollback()
 	if _, err = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(7318999999999999)"); err != nil {
 		return err
+	}
+	if len(routing) > 0 || global != nil {
+		value := "prefer"
+		if len(routing) > 0 {
+			value = routing[0]
+		} else if *global {
+			value = "strict"
+		} else {
+			value = "off"
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO settings (key,value,updated_at) VALUES ('reasoning_routing_mode',$1,NOW()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()", value); err != nil {
+			return err
+		}
 	}
 	if global != nil {
 		_, err = tx.ExecContext(ctx, "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()", ReasoningGlobalKey, fmt.Sprint(*global))
@@ -84,10 +101,16 @@ func (s *ScheduledTestService) updateReasoningPolicy(ctx context.Context, accoun
 		}
 	}
 	// Legacy true is retained as an explicit override; legacy false becomes inherit.
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object(
- 'reasoning_exclusion_policy', COALESCE(extra->>'reasoning_exclusion_policy', CASE WHEN extra->>'reasoning_auto_exclude' = 'true' THEN 'enabled' ELSE 'inherit' END),
- 'reasoning_auto_exclude', CASE COALESCE(extra->>'reasoning_exclusion_policy', CASE WHEN extra->>'reasoning_auto_exclude' = 'true' THEN 'enabled' ELSE 'inherit' END) WHEN 'enabled' THEN true WHEN 'disabled' THEN false ELSE $1 END), updated_at = NOW()
- WHERE platform = 'openai' AND deleted_at IS NULL AND ($2::bigint = 0 OR id = $2)`, enabled, accountID)
+	_, err = tx.ExecContext(ctx, `WITH policy AS (
+ SELECT id, CASE COALESCE(extra->>'reasoning_exclusion_policy', CASE WHEN extra->>'reasoning_auto_exclude'='true' THEN 'enabled' ELSE 'inherit' END)
+ WHEN 'enabled' THEN 'strict' WHEN 'disabled' THEN 'off'
+ ELSE COALESCE((SELECT value FROM settings WHERE key='reasoning_routing_mode'),'prefer') END AS effective,
+ COALESCE(extra->>'reasoning_exclusion_policy', CASE WHEN extra->>'reasoning_auto_exclude'='true' THEN 'enabled' ELSE 'inherit' END) AS override
+ FROM accounts WHERE platform='openai' AND deleted_at IS NULL AND ($2::bigint=0 OR id=$2)
+ ) UPDATE accounts a SET extra=COALESCE(a.extra,'{}'::jsonb) || jsonb_build_object(
+ 'reasoning_exclusion_policy',p.override,'reasoning_routing_mode',p.effective,
+ 'reasoning_auto_exclude',p.effective='strict'), updated_at=NOW()
+ FROM policy p WHERE a.id=p.id AND ($1::boolean IS NOT NULL)`, enabled, accountID)
 	if err != nil {
 		return err
 	}
@@ -145,4 +168,61 @@ func (s *ScheduledTestService) SetReasoningPolicy(ctx context.Context, accountID
 		snapshot = reasoningSnapshot(latest)
 	}
 	return s.updateReasoningPolicy(ctx, accountID, mode, nil, snapshot)
+}
+
+const ReasoningRoutingKey = "reasoning_routing_mode"
+
+func (s *ScheduledTestService) GetReasoningRoutingMode(ctx context.Context) (string, error) {
+	var mode string
+	err := s.db.QueryRowContext(ctx, "SELECT COALESCE((SELECT value FROM settings WHERE key=$1),'prefer')", ReasoningRoutingKey).Scan(&mode)
+	return mode, err
+}
+func (s *ScheduledTestService) SetReasoningRoutingMode(ctx context.Context, mode string) error {
+	if mode != "prefer" && mode != "strict" && mode != "off" {
+		return fmt.Errorf("mode must be prefer, strict or off")
+	}
+	strict := mode == "strict"
+	return s.updateReasoningPolicy(ctx, 0, "", &strict, nil, mode)
+}
+
+// ReasoningTier affects preference only; health and permissions remain mandatory.
+func (a *Account) ReasoningTier(now time.Time) int {
+	mode, _ := a.Extra[ReasoningRoutingKey].(string)
+	if mode == "off" || mode == "strict" {
+		return 0
+	}
+	latest, _ := a.Extra[ReasoningLatestKey].(map[string]any)
+	if latest["verdict"] == "inconclusive" {
+		if valid, ok := a.Extra["reasoning_last_valid"].(map[string]any); ok {
+			latest = valid
+		}
+	}
+	checked, _ := latest["checked_at"].(string)
+	at, err := time.Parse(time.RFC3339Nano, checked)
+	if err != nil || now.Sub(at) > 48*time.Hour {
+		return 1
+	}
+	switch latest["verdict"] {
+	case "not_degraded":
+		return 0
+	case "degraded":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func (s *ScheduledTestService) ReasoningRoutingCounts(ctx context.Context) (map[string]int, error) {
+	counts := map[string]int{"preferred": 0, "unknown": 0, "degraded": 0}
+	accounts, err := s.accountRepo.ListSchedulableByPlatform(ctx, PlatformOpenAI)
+	if err != nil {
+		return nil, err
+	}
+	names := []string{"preferred", "unknown", "degraded"}
+	for i := range accounts {
+		if accounts[i].IsSchedulable() {
+			counts[names[accounts[i].ReasoningTier(time.Now())]]++
+		}
+	}
+	return counts, nil
 }

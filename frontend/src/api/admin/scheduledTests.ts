@@ -105,7 +105,21 @@ export async function getReasoningGlobal(): Promise<boolean> {
 export async function setReasoningGlobal(enabled: boolean): Promise<void> {
  await apiClient.put('/admin/scheduled-test-plans/reasoning-policy', { enabled })
 }
+export type ReasoningRoutingMode = 'prefer' | 'strict' | 'off'
+export async function getReasoningRoutingConfig(): Promise<{mode:ReasoningRoutingMode; counts:Record<string,number>}> {
+ const { data } = await apiClient.get('/admin/scheduled-test-plans/reasoning-policy')
+ return {mode:data.mode ?? 'prefer',counts:data.counts ?? {}}
+}
+export async function getReasoningRoutingMode(): Promise<ReasoningRoutingMode> {
+ return (await getReasoningRoutingConfig()).mode
+}
+export async function setReasoningRoutingMode(mode: ReasoningRoutingMode): Promise<void> {
+ await apiClient.put('/admin/scheduled-test-plans/reasoning-policy', { mode })
+}
 export const scheduledTestsAPI = {
+ getReasoningRoutingConfig,
+ getReasoningRoutingMode,
+ setReasoningRoutingMode,
  getReasoningGlobal,
  setReasoningGlobal,
  setReasoningPolicy,

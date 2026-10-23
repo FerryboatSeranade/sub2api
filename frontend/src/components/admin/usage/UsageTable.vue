@@ -48,6 +48,7 @@
           <span class="text-sm text-gray-900 dark:text-white">{{ row.api_key?.name || '-' }}</span>
         </template>
 
+        <template #cell-reasoning_route="{ row }"><span class="text-xs" :title="row.reasoning_route || '历史记录未采集调度原因'">{{ row.reasoning_route || '—' }}</span></template>
         <template #cell-account="{ row }">
           <div class="max-w-xs break-all text-sm text-gray-900 dark:text-white">{{ row.account?.name || (row.account_id ? t('admin.usage.accountUnavailable') : '—') }}</div>
           <span v-if="row.account_id" class="text-xs text-gray-500">#{{ row.account_id }}</span>

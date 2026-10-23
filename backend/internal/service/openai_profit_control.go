@@ -330,7 +330,16 @@ func OpenAIProfitControlVeto(ctx context.Context, account *Account) (bool, strin
 // concurrency slot is actually acquired. The latest cached account replaces
 // the selection snapshot when available, so a probe/manual rate change during
 // wait time cannot pass on a stale pointer.
-func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, selected *Account) (*Account, bool, string) {
+func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, selected *Account) (latest *Account, vetoed bool, reason string) {
+	defer func() {
+		if latest != nil && selected != nil && latest != selected {
+			copy := *latest
+			copy.ReasoningRoutingTier = selected.ReasoningRoutingTier
+			copy.ReasoningFallbackReason = selected.ReasoningFallbackReason
+			latest = &copy
+		}
+	}()
+
 	if s == nil {
 		return selected, false, ""
 	}

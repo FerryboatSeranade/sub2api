@@ -227,14 +227,33 @@ func (h *ScheduledTestHandler) GetReasoningGlobal(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"enabled": enabled})
+	mode, err := h.scheduledTestSvc.GetReasoningRoutingMode(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	counts, err := h.scheduledTestSvc.ReasoningRoutingCounts(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"enabled": enabled, "mode": mode, "counts": counts})
 }
 func (h *ScheduledTestHandler) SetReasoningGlobal(c *gin.Context) {
 	var body struct {
-		Enabled *bool `json:"enabled"`
+		Enabled *bool  `json:"enabled"`
+		Mode    string `json:"mode"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil || body.Enabled == nil {
+	if err := c.ShouldBindJSON(&body); err != nil || (body.Enabled == nil && body.Mode == "") {
 		response.BadRequest(c, "enabled boolean required")
+		return
+	}
+	if body.Mode != "" {
+		if err := h.scheduledTestSvc.SetReasoningRoutingMode(c.Request.Context(), body.Mode); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"mode": body.Mode, "enabled": body.Mode == "strict"})
 		return
 	}
 	if err := h.scheduledTestSvc.SetReasoningGlobal(c.Request.Context(), *body.Enabled); err != nil {

@@ -18,8 +18,12 @@
           >
             <template #after>
               <HelpTooltip :content="t('admin.accounts.reasoning.globalHint')"><template #trigger>
-                <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" :checked="reasoningGlobal" :disabled="reasoningGlobalBusy || reasoningGlobalError" @change="setReasoningGlobal(!reasoningGlobal)" />{{ t('admin.accounts.reasoning.globalSwitch') }}</label>
+                <label class="inline-flex items-center gap-2 text-sm">质量调度
+                  <select :value="reasoningRoutingMode" class="input !w-auto" aria-label="质量调度模式" :disabled="reasoningGlobalBusy || reasoningGlobalError" @change="setReasoningRoutingMode(($event.target as HTMLSelectElement).value as ReasoningRoutingMode)">
+                    <option value="prefer">优先不降智，允许兜底（推荐）</option><option value="strict">严格排除</option><option value="off">不干预</option>
+                  </select></label>
               </template></HelpTooltip>
+              <span v-if="!reasoningGlobalError && reasoningRoutingMode === 'prefer'" class="text-xs text-gray-500" title="基础可调度账号数；请求实际可用性还需匹配分组、模型、实时额度及并发。独立策略不干预的账号归入优先层。">基础可用：优先 {{ reasoningRoutingCounts.preferred ?? 0 }} · 未知 {{ reasoningRoutingCounts.unknown ?? 0 }} · 降智兜底 {{ reasoningRoutingCounts.degraded ?? 0 }}</span>
               <span v-if="reasoningGlobalError" class="text-xs text-red-600">{{ t('admin.accounts.reasoning.loadError') }}</span>
               <button class="btn btn-secondary" @click="showReasoningOverview = true" :title="t('admin.scheduledTests.overview')">{{ t('admin.scheduledTests.overview') }}</button>
               <!-- Auto Refresh Dropdown -->
@@ -301,7 +305,7 @@
             </div>
           </template>
           <template #cell-reasoning="{ row }">
-            <AccountReasoningCell :account="row" :result="reasoningResults[row.id] ?? null" :global-enabled="reasoningGlobal" :load-error="reasoningLoadError" :busy="reasoningBusy !== null" @policy="setReasoningPolicy(row, $event)" />
+            <AccountReasoningCell :account="row" :result="reasoningResults[row.id] ?? null" :global-enabled="reasoningGlobal" :routing-mode="reasoningRoutingMode" :load-error="reasoningLoadError" :busy="reasoningBusy !== null" @policy="setReasoningPolicy(row, $event)" />
           </template>
           <template #cell-codex_ticket="{ row }">
             <button
@@ -552,18 +556,21 @@ import VM2APISyncDialog from '@/components/admin/account/VM2APISyncDialog.vue'
 const vmBridgeAccount = ref<AccountListItem | null>(null)
 import ReasoningProbeOverview from '@/components/admin/account/ReasoningProbeOverview.vue'
 import AccountReasoningCell from '@/components/admin/account/AccountReasoningCell.vue'
-import type { ReasoningOverviewItem } from '@/api/admin/scheduledTests'
+import type { ReasoningRoutingMode, ReasoningOverviewItem } from '@/api/admin/scheduledTests'
 const reasoningResults = ref<Record<number, ReasoningOverviewItem['result']>>({})
 const reasoningLoadError = ref(false)
 const reasoningGlobal = ref(false)
+const reasoningRoutingMode=ref<ReasoningRoutingMode>('prefer')
+const reasoningRoutingCounts=ref<Record<string,number>>({})
 const reasoningGlobalBusy = ref(false)
 const reasoningGlobalError = ref(true)
-const setReasoningGlobal = async (enabled: boolean) => {
+const setReasoningRoutingMode = async (mode: ReasoningRoutingMode) => {
  if (reasoningGlobalBusy.value) return
  reasoningGlobalBusy.value = true
  try {
-  await adminAPI.scheduledTests.setReasoningGlobal(enabled)
-  reasoningGlobal.value = enabled
+  await adminAPI.scheduledTests.setReasoningRoutingMode(mode)
+  reasoningRoutingMode.value = mode
+  reasoningGlobal.value = mode === 'strict'
   await load()
   appStore.showSuccess(t('admin.accounts.reasoning.saved'))
  } catch { appStore.showError(t('admin.accounts.reasoning.saveFailed')) }
@@ -573,7 +580,7 @@ const reasoningBusy = ref<number | null>(null)
 const recoveryBusy = ref<number | null>(null)
 const loadReasoningResults = async () => {
  try {
-  try { reasoningGlobal.value = await adminAPI.scheduledTests.getReasoningGlobal(); reasoningGlobalError.value = false } catch { reasoningGlobalError.value = true }
+  try { const config=await adminAPI.scheduledTests.getReasoningRoutingConfig(); reasoningRoutingMode.value=config.mode; reasoningRoutingCounts.value=config.counts; reasoningGlobal.value = reasoningRoutingMode.value === 'strict'; reasoningGlobalError.value = false } catch { reasoningGlobalError.value = true }
   const items = await adminAPI.scheduledTests.reasoningOverview()
   const next: Record<number, ReasoningOverviewItem['result']> = {}
   for (const item of items) {
@@ -588,7 +595,7 @@ const setReasoningPolicy = async (row: AccountListItem, policy: string) => {
  reasoningBusy.value = row.id
  try {
   await adminAPI.scheduledTests.setReasoningPolicy(row.id, policy)
-  row.extra = { ...row.extra, reasoning_exclusion_policy: policy, reasoning_auto_exclude: policy === 'enabled' || (policy === 'inherit' && reasoningGlobal.value) }
+  row.extra = { ...row.extra, reasoning_exclusion_policy: policy, reasoning_routing_mode: policy === 'enabled' ? 'strict' : policy === 'disabled' ? 'off' : reasoningRoutingMode.value, reasoning_auto_exclude: policy === 'enabled' || (policy === 'inherit' && reasoningGlobal.value) }
   appStore.showSuccess(t('admin.accounts.reasoning.saved'))
  } catch { appStore.showError(t('admin.accounts.reasoning.saveFailed')) }
  finally { reasoningBusy.value = null }
