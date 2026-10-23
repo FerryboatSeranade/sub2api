@@ -121,22 +121,10 @@ func (s *ScheduledTestService) updateReasoningPolicy(ctx context.Context, accoun
 }
 
 func (s *ScheduledTestService) SetReasoningGlobal(ctx context.Context, enabled bool) error {
-	// Populate accounts that have not been tested again since the status feature landed.
-	items, err := s.ReasoningOverview(ctx)
-	if err != nil {
+	if err := s.refreshReasoningSnapshots(ctx); err != nil {
 		return err
 	}
-	latest := map[int64]*ScheduledTestResult{}
-	for _, item := range items {
-		if item.Result != nil && (latest[item.AccountID] == nil || item.Result.ID > latest[item.AccountID].ID) {
-			latest[item.AccountID] = item.Result
-		}
-	}
-	for id, result := range latest {
-		if err := s.saveReasoningSnapshot(ctx, id, result); err != nil {
-			return err
-		}
-	}
+
 	return s.updateReasoningPolicy(ctx, 0, "", &enabled, nil)
 }
 
@@ -180,6 +168,9 @@ func (s *ScheduledTestService) GetReasoningRoutingMode(ctx context.Context) (str
 func (s *ScheduledTestService) SetReasoningRoutingMode(ctx context.Context, mode string) error {
 	if mode != "prefer" && mode != "strict" && mode != "off" {
 		return fmt.Errorf("mode must be prefer, strict or off")
+	}
+	if err := s.refreshReasoningSnapshots(ctx); err != nil {
+		return err
 	}
 	strict := mode == "strict"
 	return s.updateReasoningPolicy(ctx, 0, "", &strict, nil, mode)
@@ -225,4 +216,24 @@ func (s *ScheduledTestService) ReasoningRoutingCounts(ctx context.Context) (map[
 		}
 	}
 	return counts, nil
+}
+
+func (s *ScheduledTestService) refreshReasoningSnapshots(ctx context.Context) error {
+	// Populate accounts that have not been tested again since the status feature landed.
+	items, err := s.ReasoningOverview(ctx)
+	if err != nil {
+		return err
+	}
+	latest := map[int64]*ScheduledTestResult{}
+	for _, item := range items {
+		if item.Result != nil && (latest[item.AccountID] == nil || item.Result.ID > latest[item.AccountID].ID) {
+			latest[item.AccountID] = item.Result
+		}
+	}
+	for id, result := range latest {
+		if err := s.saveReasoningSnapshot(ctx, id, result); err != nil {
+			return err
+		}
+	}
+	return nil
 }
