@@ -115,7 +115,11 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 
 	logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] found %d due plans", len(plans))
 
-	sem := make(chan struct{}, scheduledTestDefaultMaxWorkers)
+	workers := scheduledTestDefaultMaxWorkers
+	if settings, err := s.scheduledSvc.ProbeSettings(ctx); err == nil {
+		workers = settings.Concurrency
+	}
+	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
 
 	for _, plan := range plans {
@@ -176,16 +180,30 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 		}
 		plan = fresh
 	}
+	if err := s.scheduledSvc.ProbeGate(ctx, plan.AccountID, !scheduled); err != nil {
+		if scheduled {
+			return nil, nil
+		}
+		return nil, err
+	}
+	releaseSlot, err := s.scheduledSvc.acquireProbeSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseSlot()
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 	var result *ScheduledTestResult
 	if plan.TestKind == ScheduledTestCandyV1 || plan.TestKind == ScheduledTestPelicanV1 {
-		select {
-		case s.reasoningSlots <- struct{}{}:
-			defer func() { <-s.reasoningSlots }()
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		if s.db == nil {
+			select {
+			case s.reasoningSlots <- struct{}{}:
+				defer func() { <-s.reasoningSlots }()
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
+
 		if plan.TestKind == ScheduledTestPelicanV1 {
 			result, err = s.accountTestSvc.RunPelicanProbe(ctx, plan.AccountID, plan.ModelID)
 		} else {
@@ -206,6 +224,10 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 		return nil, err
 	}
 
+	if err := s.scheduledSvc.RecordProbeFailure(ctx, plan.AccountID, result); err != nil {
+		return nil, err
+	}
+
 	// Auto-recover account if test succeeded and auto_recover is enabled.
 	if result.Status == "success" && plan.AutoRecover && plan.TestKind == ScheduledTestConnectivity {
 		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID)
@@ -216,6 +238,11 @@ func (s *ScheduledTestRunnerService) executePlan(ctx context.Context, plan *Sche
 		return nil, err
 	}
 
+	if s.scheduledSvc.db != nil {
+		if control, _, e := s.scheduledSvc.probeControl(ctx, plan.AccountID); e == nil && control.PauseUntil != nil && control.PauseUntil.After(nextRun) {
+			nextRun = *control.PauseUntil
+		}
+	}
 	if err := s.planRepo.UpdateAfterRun(ctx, plan.ID, time.Now(), nextRun); err != nil {
 		return nil, err
 	}

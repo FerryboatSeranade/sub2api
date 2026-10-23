@@ -243,3 +243,52 @@ func (h *ScheduledTestHandler) SetReasoningGlobal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"enabled": *body.Enabled})
 }
+
+func (h *ScheduledTestHandler) ProbeManagement(c *gin.Context) {
+	items, err := h.scheduledTestSvc.ProbeManagement(c.Request.Context(), c.DefaultQuery("kind", service.ScheduledTestCandyV1))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(200, items)
+}
+func (h *ScheduledTestHandler) ProbeSettings(c *gin.Context) {
+	if c.Request.Method == "PUT" {
+		var v service.ProbeSettings
+		if err := c.ShouldBindJSON(&v); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		if err := h.scheduledTestSvc.SetProbeSettings(c.Request.Context(), v); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
+	v, err := h.scheduledTestSvc.ProbeSettings(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(200, v)
+}
+func (h *ScheduledTestHandler) ProbeAction(c *gin.Context) {
+	var a service.ProbeAction
+	if err := c.ShouldBindJSON(&a); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	v, err := h.scheduledTestSvc.ProbeAction(c.Request.Context(), a)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	c.JSON(200, v)
+}
+func (h *ScheduledTestHandler) CleanupDeletedProbePlans(c *gin.Context) {
+	n, err := h.scheduledTestSvc.CleanupDeletedProbePlans(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(200, gin.H{"disabled": n})
+}

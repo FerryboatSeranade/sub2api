@@ -1,43 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, flushPromises, shallowMount } from '@vue/test-utils'
-import ReasoningProbeOverview from '../ReasoningProbeOverview.vue'
-vi.mock('vue-i18n', async (importOriginal) => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (k: string) => k }) }))
-const { overview, runNow, update, showError } = vi.hoisted(() => ({ overview: vi.fn(), runNow: vi.fn(), update: vi.fn(), showError: vi.fn() }))
-vi.mock('@/api/admin/scheduledTests', () => ({ scheduledTestsAPI: { reasoningOverview: overview, runNow, update } }))
-vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError }) }))
-enableAutoUnmount(afterEach)
-const row = (id: number, state: string) => ({ account_id: id, account_name: `test-${id}`, plan_id: id, enabled: true, cron_expression: '0 3 * * *', result: { id, started_at: '2026-10-17T00:00:00Z', model_id: 'gpt-6.1-sol', quality: { verdict: state, numbers: state === 'not_degraded' ? ['21'] : ['29'] }, response_text: 'answer' } })
-async function open() {
- const w = shallowMount(ReasoningProbeOverview, { props: { show: false }, global: { stubs: { BaseDialog: { template: '<div><slot /></div>' } } } })
- await w.setProps({ show: true }); await flushPromises(); return w
-}
-describe('reasoning overview', () => {
- beforeEach(() => { vi.resetAllMocks(); overview.mockResolvedValue([row(1, 'not_degraded'), row(2, 'degraded'), row(3, 'inconclusive')]) })
- it('renders all verdicts and retains original text', async () => {
-  const w = await open()
-  expect(w.text()).toContain('admin.scheduledTests.not_degraded: 1')
-  expect(w.text()).toContain('admin.scheduledTests.degraded: 1')
-  expect(w.text()).toContain('admin.scheduledTests.inconclusive: 1')
-  expect(w.text()).toContain('21')
-  expect(w.findAll('details')).toHaveLength(3)
- })
- it('limits full-batch execution to two calls and stops queued work on close', async () => {
-  const resolvers: Array<(v: unknown) => void> = []
-  runNow.mockImplementation(() => new Promise(resolve => resolvers.push(resolve)))
-  const w = await open()
-  await w.findAll('button').find(b => b.text() === 'admin.scheduledTests.runAll')!.trigger('click')
-  expect(runNow).toHaveBeenCalledTimes(2)
-  await w.setProps({ show: false })
-  resolvers.forEach(resolve => resolve(row(1,'not_degraded').result))
-  await flushPromises()
-  expect(runNow).toHaveBeenCalledTimes(2)
- })
- it('does not reclassify failed API calls as degraded', async () => {
-  runNow.mockRejectedValue(new Error('timeout'))
-  const w = await open()
-  await w.findAll('button').find(b => b.text() === 'admin.scheduledTests.runNow')!.trigger('click')
-  await flushPromises()
-  expect(showError).toHaveBeenCalledWith('#1: timeout')
-  expect(w.text()).toContain('admin.scheduledTests.not_degraded: 1')
- })
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import Overview from '../ReasoningProbeOverview.vue'
+const m=vi.hoisted(()=>({list:vi.fn(),settings:vi.fn(),action:vi.fn(),run:vi.fn(),sync:vi.fn(),error:vi.fn()}))
+vi.mock('@/stores/app',()=>({useAppStore:()=>({showError:m.error,showSuccess:vi.fn()})}))
+vi.mock('@/api/admin/scheduledTests',()=>({probeManagementAPI:{list:m.list,settings:m.settings,action:m.action},scheduledTestsAPI:{runNow:m.run}}))
+vi.mock('@/api/admin/vm2api',()=>({getVMBridge:vi.fn(),syncVMBridge:m.sync}))
+const item=(id:number,vm='not_linked',v='not_degraded')=>({account_id:id,account_name:'account'+id,account_type:'oauth',deleted:false,vm_state:vm,target_id:0,control:{excluded:false,note:'',pause_code:'',pause_until:null,failures:0},plans:[{id,enabled:true,cron_expression:'15 4 * * *'}],result:{id,quality:{verdict:v,numbers:['21']},status:'success',finished_at:'2026-10-23T01:00:00Z'}})
+async function setup(){const w=mount(Overview,{props:{show:false},global:{stubs:{BaseDialog:{template:'<div><slot /></div>'}}}});await w.setProps({show:true});await flushPromises();return w}
+function button(w:any,text:string){return w.findAll('button').find((x:any)=>x.text().includes(text))!}
+beforeEach(()=>{vi.clearAllMocks();m.list.mockResolvedValue([item(1),item(2,'derived'),item(3,'not_linked','degraded')]);m.settings.mockResolvedValue({concurrency:10,exclude_vm:false});m.action.mockResolvedValue([{id:1}])})
+describe('probe management',()=>{
+ it('scopes batch selection to filters and previews before VM transfer',async()=>{const w=await setup();await w.find('[aria-label="检测状态筛选"]').setValue('not_degraded');await w.find('[aria-label="VM 关联筛选"]').setValue('not_linked');await button(w,'全选筛选').trigger('click');await button(w,'批量转入').trigger('click');expect(w.text()).toContain('确认操作：转入 VM2API · 1 个账号');expect(m.sync).not.toHaveBeenCalled();expect(w.text()).toContain('检测所选（并发 10）')})
+ it('skips excluded VM plans even when enabled',async()=>{m.settings.mockResolvedValue({concurrency:10,exclude_vm:true});m.list.mockResolvedValue([item(2,'derived')]);const w=await setup();await button(w,'全选筛选').trigger('click');await button(w,'检测所选').trigger('click');await button(w,'确认执行').trigger('click');await flushPromises();expect(m.run).not.toHaveBeenCalled();expect(w.text()).toContain('跳过')})
+ it('requires a persistent exclusion note',async()=>{const w=await setup();await w.find('article input[type="checkbox"]').setValue(true);await button(w,'排除检测').trigger('click');await button(w,'确认执行').trigger('click');expect(m.error).toHaveBeenCalledWith('请填写排除备注');expect(m.action).not.toHaveBeenCalled()})
 })

@@ -767,6 +767,11 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	plans := admin.Group("/scheduled-test-plans")
 	{
 		plans.GET("/reasoning-overview", h.Admin.ScheduledTest.ReasoningOverview)
+		plans.GET("/management", h.Admin.ScheduledTest.ProbeManagement)
+		plans.GET("/probe-settings", h.Admin.ScheduledTest.ProbeSettings)
+		plans.PUT("/probe-settings", h.Admin.ScheduledTest.ProbeSettings)
+		plans.POST("/batch-action", h.Admin.ScheduledTest.ProbeAction)
+		plans.POST("/cleanup-deleted", h.Admin.ScheduledTest.CleanupDeletedProbePlans)
 		plans.POST("", h.Admin.ScheduledTest.Create)
 		plans.PUT("/:id", h.Admin.ScheduledTest.Update)
 		plans.DELETE("/:id", h.Admin.ScheduledTest.Delete)

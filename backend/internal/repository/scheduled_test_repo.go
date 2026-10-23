@@ -54,6 +54,7 @@ func (r *scheduledTestPlanRepository) ListDue(ctx context.Context, now time.Time
 		SELECT id, account_id, model_id, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_kind
 		FROM scheduled_test_plans
 		WHERE enabled = true AND next_run_at <= $1
+ AND EXISTS (SELECT 1 FROM accounts a WHERE a.id=scheduled_test_plans.account_id AND a.deleted_at IS NULL)
 		ORDER BY next_run_at ASC
 	`, now)
 	if err != nil {

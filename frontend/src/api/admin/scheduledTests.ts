@@ -119,3 +119,20 @@ export const scheduledTestsAPI = {
 }
 
 export default scheduledTestsAPI
+
+export interface ProbeManagementItem {
+ account_id: number; account_name: string; account_type: string; deleted: boolean
+ vm_state: 'not_linked' | 'linked' | 'derived'; target_id: number
+ control: { excluded: boolean; note: string; pause_code: string; pause_until: string | null; failures: number }
+ review?: { result_id: number; verdict: string; note: string; at: string }
+ plans: ScheduledTestPlan[]; result: ScheduledTestResult | null
+ failure?: { code: string; label: string; advice: string; permanent: boolean; delay_seconds: number }
+}
+export interface ProbeSettings { concurrency: number; exclude_vm: boolean }
+export const probeManagementAPI = {
+ list: async (kind: string) => (await apiClient.get<ProbeManagementItem[]>('/admin/scheduled-test-plans/management', { params: { kind } })).data,
+ settings: async () => (await apiClient.get<ProbeSettings>('/admin/scheduled-test-plans/probe-settings')).data,
+ saveSettings: async (value: ProbeSettings) => (await apiClient.put<ProbeSettings>('/admin/scheduled-test-plans/probe-settings', value)).data,
+ action: async (value: { ids: number[]; action: string; kind: string; model?: string; cron?: string; note?: string; verdict?: string; result_id?: number }) => (await apiClient.post<{id:number;error?:string}[]>('/admin/scheduled-test-plans/batch-action',value)).data,
+ cleanup: async () => (await apiClient.post<{disabled:number}>('/admin/scheduled-test-plans/cleanup-deleted')).data
+}
