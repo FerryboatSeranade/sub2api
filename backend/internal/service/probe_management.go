@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +19,11 @@ type ProbeFailure struct {
 	DelaySeconds int    `json:"delay_seconds"`
 }
 
+func probeHTTPStatus(message string, status int) bool {
+	code := strconv.Itoa(status)
+	return strings.HasPrefix(strings.TrimSpace(message), code+":") || regexp.MustCompile(`(?i)(?:api returned|http(?: status)?|status["']?\s*[:=])\s*`+code+`\b`).MatchString(message)
+}
+
 func ClassifyProbeFailure(r *ScheduledTestResult) *ProbeFailure {
 	if r == nil || r.Status == "success" {
 		return nil
@@ -26,17 +33,17 @@ func ClassifyProbeFailure(r *ScheduledTestResult) *ProbeFailure {
 	switch {
 	case strings.Contains(m, "group_deleted"):
 		f = &ProbeFailure{"group_deleted", "分组已删除", "修复上游 Key 所属分组或更换 Key 后手动恢复检测", true, 0}
-	case strings.Contains(m, "token_revoked") || strings.Contains(m, "invalidated oauth") || strings.Contains(m, "401"):
+	case strings.Contains(m, "token_revoked") || strings.Contains(m, "invalidated oauth") || probeHTTPStatus(m, 401):
 		f = &ProbeFailure{"auth_invalid", "认证失效", "重新登录或更新凭证后手动恢复检测", true, 0}
-	case strings.Contains(m, "usage policy") || strings.Contains(m, "403"):
+	case strings.Contains(m, "usage policy") || probeHTTPStatus(m, 403):
 		f = &ProbeFailure{"policy_blocked", "访问被阻断（403）", "检查上游策略、账号权限和模型支持；修复后手动恢复检测", true, 0}
 	case strings.Contains(m, "quota_exhausted") || strings.Contains(m, "额度已耗尽"):
 		f = &ProbeFailure{"quota_exhausted", "额度耗尽", "等待额度恢复或修复账号池；至少 1 小时后再检测", false, 3600}
 	case strings.Contains(m, "overloaded"):
 		f = &ProbeFailure{"overloaded", "上游过载", "不立即重试，至少 5 分钟后再检测", false, 300}
-	case strings.Contains(m, "429") || strings.Contains(m, "rate_limit"):
+	case probeHTTPStatus(m, 429) || strings.Contains(m, "rate_limit"):
 		f = &ProbeFailure{"rate_limited", "请求限流", "降低请求频率，至少 15 分钟后再检测", false, 900}
-	case strings.Contains(m, "500") || strings.Contains(m, "503") || strings.Contains(m, "server_error") || strings.Contains(m, "processing your request"):
+	case probeHTTPStatus(m, 500) || probeHTTPStatus(m, 503) || strings.Contains(m, "server_error") || strings.Contains(m, "processing your request"):
 		f = &ProbeFailure{"upstream_error", "上游服务异常", "保留 request ID，至少 5 分钟后再检测", false, 300}
 	case strings.Contains(m, "timeout") || strings.Contains(m, "deadline") || strings.Contains(m, "connection"):
 		f = &ProbeFailure{"network", "网络或超时", "检查网络，至少 5 分钟后再检测", false, 300}

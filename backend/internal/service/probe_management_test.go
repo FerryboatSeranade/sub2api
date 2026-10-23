@@ -22,6 +22,7 @@ func TestProbeFailureClassification(t *testing.T) {
 		{`An error occurred while processing your request. Request ID abc`, "upstream_error", false},
 		{`API returned 429: rate_limit`, "rate_limited", false},
 		{`context deadline exceeded`, "network", false},
+		{`Unknown failure request ID 403-401-503-500`, "unknown", false},
 	}
 	for _, c := range cases {
 		t.Run(c.code, func(t *testing.T) {
