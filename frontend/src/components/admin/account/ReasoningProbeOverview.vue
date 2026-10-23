@@ -1,5 +1,5 @@
 <template>
- <BaseDialog :show="show" title="账号检测与 VM2API 总览" width="wide" @close="emit('close')">
+ <BaseDialog :show="show" title="账号检测与 VM2API 总览" width="extra-wide" @close="emit('close')">
   <div class="space-y-4 text-sm">
    <p class="text-xs text-gray-500">糖果检测以答案包含独立数字 21 为通过，仅是单题启发式。鹈鹕自动评分只检查 SVG 结构，需人工看图判断；调用失败单独归为异常，不等同降智。</p>
    <div class="flex flex-wrap items-center gap-3 rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
@@ -9,10 +9,10 @@
     <p class="w-full text-xs text-gray-500">默认并发 10，可设 1–32；与单账号 / VM / Key 的 2 并发不同。排除检测会覆盖已有定时计划，计划与历史仍保留；不会停止正常 API 调度。取消排除后按计划继续。</p>
    </div>
    <div class="flex flex-wrap gap-2">
-    <select v-model="kind" class="input" aria-label="检测类型" :disabled="busy"><option value="candy_v1">糖果推理检测</option><option value="pelican_svg_v1">鹈鹕骑自行车 SVG</option></select>
-    <select v-model="stateFilter" class="input" aria-label="检测状态筛选"><option value="">全部检测状态</option><option v-for="(label,state) in labels" :key="state" :value="state">{{ label }}（{{ items.filter(i => verdict(i) === state).length }}）</option></select>
-    <select v-model="vmFilter" class="input" aria-label="VM 关联筛选"><option value="">全部 VM 状态</option><option value="not_linked">尚未转入 VM</option><option value="linked">原账号已关联 VM</option><option value="derived">VM 衍生账号</option></select>
-    <select v-model="errorFilter" class="input" aria-label="异常原因筛选"><option value="">全部异常原因</option><option v-for="f in failures" :key="f.code" :value="f.code">{{ f.label }}</option></select>
+    <select v-model="kind" class="input !w-auto min-w-[160px] flex-1" aria-label="检测类型" :disabled="busy"><option value="candy_v1">糖果推理检测</option><option value="pelican_svg_v1">鹈鹕骑自行车 SVG</option></select>
+    <select v-model="stateFilter" class="input !w-auto min-w-[160px] flex-1" aria-label="检测状态筛选"><option value="">全部检测状态</option><option v-for="(label,state) in labels" :key="state" :value="state">{{ label }}（{{ items.filter(i => verdict(i) === state).length }}）</option></select>
+    <select v-model="vmFilter" class="input !w-auto min-w-[160px] flex-1" aria-label="VM 关联筛选"><option value="">全部 VM 状态</option><option value="not_linked">尚未转入 VM</option><option value="linked">原账号已关联 VM</option><option value="derived">VM 衍生账号</option></select>
+    <select v-model="errorFilter" class="input !w-auto min-w-[160px] flex-1" aria-label="异常原因筛选"><option value="">全部异常原因</option><option v-for="f in failures" :key="f.code" :value="f.code">{{ f.label }}</option></select>
     <input v-model="search" class="input flex-1" placeholder="搜索账号、ID、错误信息" aria-label="搜索账号" />
     <button class="btn btn-secondary" :disabled="loading || busy" title="重新读取服务器最新结果" @click="load">刷新</button>
     <button class="btn btn-secondary" title="导出当前筛选账号及最新结果，不包含凭证" @click="exportResults">导出筛选结果</button>
