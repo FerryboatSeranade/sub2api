@@ -169,7 +169,7 @@ func TestVMBridgeNewSlotFailedSmokeNeverCutsOver(t *testing.T) {
 		case r.URL.Path == "/api/panel/vms/create":
 			var b map[string]any
 			json.NewDecoder(r.Body).Decode(&b)
-			if b["id"] != stable || b["max_concurrency"] != float64(2) {
+			if b["id"] != stable || b["max_concurrency"] != float64(3) {
 				t.Error("incorrect isolated slot")
 			}
 			created = true
@@ -185,7 +185,7 @@ func TestVMBridgeNewSlotFailedSmokeNeverCutsOver(t *testing.T) {
 				Max     int      `json:"max_concurrency"`
 			}
 			json.NewDecoder(r.Body).Decode(&b)
-			if len(b.Allowed) != 1 || b.Allowed[0] != stable || b.Max != 2 {
+			if len(b.Allowed) != 1 || b.Allowed[0] != stable || b.Max != 3 {
 				t.Error("key not isolated")
 			}
 			w.Write([]byte(`{"ok":true,"item":{"id":"key_new","key":"dedicated"}}`))

@@ -328,11 +328,11 @@ func (s *VM2APIBridge) run(ctx context.Context, a *Account, st *VMBridgeState) e
 		return e
 	}
 	if !found {
-		if e := s.call(ctx, "POST", "/api/panel/vms/create", map[string]any{"id": vmID, "name": a.Name, "platform": "openai", "family": "codex", "kernel": "ubuntu", "runtime_type": "docker", "machine": map[string]any{"memory": "2g"}, "proxy_id": s.proxy, "start": false, "activate": false, "max_concurrency": 2}, nil); e != nil {
+		if e := s.call(ctx, "POST", "/api/panel/vms/create", map[string]any{"id": vmID, "name": a.Name, "platform": "openai", "family": "codex", "kernel": "ubuntu", "runtime_type": "docker", "machine": map[string]any{"memory": "2g"}, "proxy_id": s.proxy, "start": false, "activate": false, "max_concurrency": 3}, nil); e != nil {
 			return e
 		}
 	}
-	if e := s.call(ctx, "PATCH", "/api/panel/vms/"+vmID, map[string]any{"max_concurrency": 2}, nil); e != nil {
+	if e := s.call(ctx, "PATCH", "/api/panel/vms/"+vmID, map[string]any{"max_concurrency": 3}, nil); e != nil {
 		return e
 	}
 	if e := s.step(ctx, a.ID, st, "credentials", "导入最新凭证并启动容器"); e != nil {
@@ -369,7 +369,7 @@ func (s *VM2APIBridge) run(ctx context.Context, a *Account, st *VMBridgeState) e
 		}
 	}
 	var key string
-	scope := map[string]any{"name": stable, "group_type": "openai", "allowed_vms": []string{vmID}, "vm_pool_id": nil, "max_concurrency": 2, "status": "active"}
+	scope := map[string]any{"name": stable, "group_type": "openai", "allowed_vms": []string{vmID}, "vm_pool_id": nil, "max_concurrency": 3, "status": "active"}
 	if keyID == "" {
 		var r struct {
 			Item struct {
@@ -617,9 +617,9 @@ func (s *VM2APIBridge) commit(ctx context.Context, a *Account, st *VMBridgeState
 	credentials, _ := json.Marshal(map[string]any{"api_key": key, "base_url": s.apiBase})
 	extra, _ := json.Marshal(map[string]any{"vm2api_identity": marker, "vm2api_source_id": a.ID, "vm2api_vm_id": st.VMID, "vm2api_key_id": st.KeyID})
 	if target == 0 {
-		e = tx.QueryRowContext(ctx, `INSERT INTO accounts (name,platform,type,credentials,extra,concurrency,priority,rate_multiplier,status,schedulable,notes) SELECT $1,'openai','apikey',$2::jsonb,$3::jsonb,2,priority,rate_multiplier,'active',true,'Managed by vm2api bridge' FROM accounts WHERE id=$4 RETURNING id`, a.Name+" · vm2api", string(credentials), string(extra), a.ID).Scan(&target)
+		e = tx.QueryRowContext(ctx, `INSERT INTO accounts (name,platform,type,credentials,extra,concurrency,priority,rate_multiplier,status,schedulable,notes) SELECT $1,'openai','apikey',$2::jsonb,$3::jsonb,3,priority,rate_multiplier,'active',true,'Managed by vm2api bridge' FROM accounts WHERE id=$4 RETURNING id`, a.Name+" · vm2api", string(credentials), string(extra), a.ID).Scan(&target)
 	} else {
-		_, e = tx.ExecContext(ctx, "UPDATE accounts SET credentials=credentials || $1::jsonb,extra=extra || $2::jsonb,concurrency=2,status='active',schedulable=true,updated_at=now() WHERE id=$3 AND type='apikey'", string(credentials), string(extra), target)
+		_, e = tx.ExecContext(ctx, "UPDATE accounts SET credentials=credentials || $1::jsonb,extra=extra || $2::jsonb,concurrency=3,status='active',schedulable=true,updated_at=now() WHERE id=$3 AND type='apikey'", string(credentials), string(extra), target)
 	}
 	if e != nil {
 		return errors.New("保存目标账号失败")
