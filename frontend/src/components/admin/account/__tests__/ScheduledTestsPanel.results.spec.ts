@@ -15,10 +15,10 @@ function deferred<T>() {
 }
 
 import ScheduledTestsPanel from '../ScheduledTestsPanel.vue'
-const { listByAccount, listResults, showError } = vi.hoisted(() => ({
-  listByAccount: vi.fn(), listResults: vi.fn(), showError: vi.fn(),
+const { listByAccount, listResults, runNow, showError } = vi.hoisted(() => ({
+  listByAccount: vi.fn(), listResults: vi.fn(), runNow: vi.fn(), showError: vi.fn(),
 }))
-vi.mock('@/api/admin', () => ({ adminAPI: { scheduledTests: { listByAccount, listResults } } }))
+vi.mock('@/api/admin', () => ({ adminAPI: { scheduledTests: { listByAccount, listResults, runNow } } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError }) }))
 
 async function openPanel() {
@@ -36,6 +36,15 @@ describe('scheduled test result selection', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     listByAccount.mockResolvedValue([1, 2].map(id => ({ id, model_id: `model-${id}`, enabled: true })))
+  })
+
+  it('notifies the parent after a manual probe completes', async () => {
+    runNow.mockResolvedValue(result(30))
+    listResults.mockResolvedValue([result(30)])
+    const wrapper = await openPanel()
+    await wrapper.find('button[title="admin.scheduledTests.runNow"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('result-updated')).toHaveLength(1)
   })
 
   it.each(['resolve', 'reject'] as const)('ignores an old plan request that later %ss', async outcome => {

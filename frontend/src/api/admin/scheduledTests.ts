@@ -136,6 +136,7 @@ export default scheduledTestsAPI
 
 export interface ProbeManagementItem {
  account_id: number; account_name: string; account_type: string; deleted: boolean
+ plan_type?: string; source_id?: number; source_name?: string
  vm_state: 'not_linked' | 'linked' | 'derived'; target_id: number
  control: { excluded: boolean; note: string; pause_code: string; pause_until: string | null; failures: number }
  review?: { result_id: number; verdict: string; note: string; at: string }

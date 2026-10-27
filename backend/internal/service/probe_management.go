@@ -66,6 +66,9 @@ type ProbeReview struct {
 }
 type ProbeManagementItem struct {
 	AccountID   int64                `json:"account_id"`
+	PlanType    string               `json:"plan_type"`
+	SourceID    int64                `json:"source_id"`
+	SourceName  string               `json:"source_name"`
 	AccountName string               `json:"account_name"`
 	AccountType string               `json:"account_type"`
 	Deleted     bool                 `json:"deleted"`
@@ -114,9 +117,10 @@ func (s *ScheduledTestService) ProbeManagement(ctx context.Context, kind string)
 		return nil, fmt.Errorf("invalid test kind")
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT a.id,a.name,a.type,a.deleted_at IS NOT NULL,COALESCE(a.extra,'{}'),
+ COALESCE(NULLIF(src.credentials->>'plan_type',''),NULLIF(a.credentials->>'plan_type',''),'unknown'),COALESCE(src.id,0),COALESCE(src.name,''),
  COALESCE((SELECT json_agg(p ORDER BY p.id) FROM scheduled_test_plans p WHERE p.account_id=a.id AND p.test_kind=$1),'[]'),
  (SELECT row_to_json(r) FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id WHERE p.account_id=a.id AND r.test_kind=$1 ORDER BY r.finished_at DESC,r.id DESC LIMIT 1)
- FROM accounts a WHERE a.platform='openai' AND (a.deleted_at IS NULL OR EXISTS(SELECT 1 FROM scheduled_test_plans p WHERE p.account_id=a.id AND p.enabled)) ORDER BY a.id`, kind)
+ FROM accounts a LEFT JOIN accounts src ON src.id::text=a.extra->>'vm2api_source_id' WHERE a.platform='openai' AND (a.deleted_at IS NULL OR EXISTS(SELECT 1 FROM scheduled_test_plans p WHERE p.account_id=a.id AND p.enabled)) ORDER BY a.id`, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +130,7 @@ func (s *ScheduledTestService) ProbeManagement(ctx context.Context, kind string)
 		i := &ProbeManagementItem{VMState: "not_linked"}
 		var extra, plans []byte
 		var result sql.NullString
-		if err = rows.Scan(&i.AccountID, &i.AccountName, &i.AccountType, &i.Deleted, &extra, &plans, &result); err != nil {
+		if err = rows.Scan(&i.AccountID, &i.AccountName, &i.AccountType, &i.Deleted, &extra, &i.PlanType, &i.SourceID, &i.SourceName, &plans, &result); err != nil {
 			return nil, err
 		}
 		var e map[string]json.RawMessage

@@ -527,6 +527,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'result-updated'): void
 }>()
 
 const testKindOptions = computed(() => [
@@ -552,6 +553,7 @@ const handleRun = async (plan: ScheduledTestPlan) => {
   runningPlanIds.add(plan.id)
   try {
     await adminAPI.scheduledTests.runNow(plan.id)
+    emit('result-updated')
     if (!props.show || props.accountId !== accountId) return
     await loadPlans()
     expandedPlanId.value = null

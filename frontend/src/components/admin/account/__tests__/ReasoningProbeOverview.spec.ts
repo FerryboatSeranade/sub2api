@@ -15,3 +15,20 @@ describe('probe management',()=>{
  it('skips converted originals with enabled plans independently',async()=>{m.settings.mockResolvedValue({concurrency:10,exclude_vm:false,exclude_vm_source:true});m.list.mockResolvedValue([item(4,'linked')]);const w=await setup();expect(w.text()).toContain('排除已转为 vm2api 的原生账号检测');await button(w,'全选筛选').trigger('click');await button(w,'检测所选').trigger('click');await button(w,'确认执行').trigger('click');await flushPromises();expect(m.run).not.toHaveBeenCalled();expect(w.text()).toContain('跳过')})
  it('requires a persistent exclusion note',async()=>{const w=await setup();await w.find('article input[type="checkbox"]').setValue(true);await button(w,'排除检测').trigger('click');await button(w,'确认执行').trigger('click');expect(m.error).toHaveBeenCalledWith('请填写排除备注');expect(m.action).not.toHaveBeenCalled()})
 })
+
+describe('plan and transport dimensions',()=>{
+ it('filters VM Pro separately from native Pro and VM Plus',async()=>{
+  m.list.mockResolvedValue([{...item(1),plan_type:'pro'},{...item(2,'derived','degraded'),plan_type:'pro',source_id:10,source_name:'source-pro'},{...item(3,'derived'),plan_type:'plus'}])
+  const w=await setup()
+  await w.find('[aria-label="筛选 VM2API · Pro · 降智"]').trigger('click')
+  expect(w.findAll('article')).toHaveLength(1)
+  expect(w.find('article').text()).toContain('source-pro')
+  expect(w.find('article').text()).toContain('account2')
+ })
+ it('notifies the account list as soon as a probe finishes',async()=>{
+  const row=item(1);row.plans[0]={...row.plans[0],model_id:'gpt-6.1-sol'} as any
+  m.list.mockResolvedValue([row]);m.run.mockResolvedValue({...row.result,id:22})
+  const w=await setup();await button(w,'立即检测').trigger('click');await button(w,'确认执行').trigger('click');await flushPromises()
+  expect(w.emitted('result-updated')).toHaveLength(1)
+ })
+})

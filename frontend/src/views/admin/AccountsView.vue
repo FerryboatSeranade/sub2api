@@ -490,8 +490,8 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" @completed="handleAccountTestCompleted" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <VM2APISyncDialog :account="vmBridgeAccount" @close="vmBridgeAccount = null" @updated="reload" />
-    <ReasoningProbeOverview :show="showReasoningOverview" @close="showReasoningOverview = false; loadReasoningResults()" />
-    <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
+    <ReasoningProbeOverview @result-updated="refreshProbeState" :show="showReasoningOverview" @close="showReasoningOverview = false; loadReasoningResults()" />
+    <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @result-updated="refreshProbeState" @close="closeSchedulePanel" />
     <CodexTicketDashboard :show="showCodexTickets" :account="codexTicketAcc" @close="showCodexTickets = false" @updated="handleAccountUpdated" />
     <CodexDiagnosticModal :show="showCodexDiagnostic" :account="codexDiagnosticAcc" @close="showCodexDiagnostic = false" @completed="handleCodexDiagnosticCompleted" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @codex-diagnostic="openCodexDiagnostic" />
@@ -590,6 +590,19 @@ const loadReasoningResults = async () => {
   reasoningResults.value = next
   reasoningLoadError.value = false
  } catch { reasoningLoadError.value = true }
+}
+let probeRefreshRunning = false
+let probeRefreshPending = false
+const refreshProbeState = async () => {
+ probeRefreshPending = true
+ if (probeRefreshRunning) return
+ probeRefreshRunning = true
+ try {
+  while (probeRefreshPending) {
+   probeRefreshPending = false
+   await load({ refreshTodayStats: false })
+  }
+ } finally { probeRefreshRunning = false }
 }
 const setReasoningPolicy = async (row: AccountListItem, policy: string) => {
  if (reasoningBusy.value !== null) return

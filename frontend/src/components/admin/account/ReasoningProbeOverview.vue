@@ -7,11 +7,18 @@
     <label class="flex items-center gap-2"><input v-model="settings.exclude_vm" type="checkbox" :disabled="busy" />排除所有 vm2api 衍生账号检测</label>
       <label class="flex items-center gap-2" title="仅排除已有 vm2api 衍生账号的原生账号；手动与定时检测均跳过，已有计划保留。与衍生账号开关独立。"><input v-model="settings.exclude_vm_source" type="checkbox" :disabled="busy" />排除已转为 vm2api 的原生账号检测</label>
     <button class="btn btn-secondary" :disabled="busy" title="保存手动与定时检测共同使用的并发和排除规则" @click="saveSettings">保存检测设置</button>
-    <p class="w-full text-xs text-gray-500">默认并发 10，可设 1–32；与单账号 / VM / Key 的 2 并发不同。排除检测会覆盖已有定时计划，计划与历史仍保留；不会停止正常 API 调度。取消排除后按计划继续。</p>
+    <p class="w-full text-xs text-gray-500">默认并发 10，可设 1–32；与单账号 / VM / Key 的请求并发独立。排除检测会覆盖已有定时计划，计划与历史仍保留；不会停止正常 API 调度。取消排除后按计划继续。</p>
    </div>
+   <section class="overflow-x-auto rounded-lg border dark:border-dark-600" aria-label="套餐与接入方式检测统计">
+    <table class="w-full text-left text-xs"><caption class="p-3 text-left text-gray-500">当前检测类型的最新结果。套餐与 VM2API 可交叉筛选；VM 行是套餐行的子集，不可相加。每行代表一条账号记录，原生与衍生账号分别计数。</caption>
+     <thead class="bg-gray-50 dark:bg-dark-800"><tr><th class="p-3">账号分类</th><th class="p-3">总数</th><th v-for="(label,state) in labels" :key="state" class="p-3">{{ label }}</th></tr></thead>
+     <tbody><tr v-for="g in summaries" :key="g.name" class="border-t dark:border-dark-600"><th class="p-3 whitespace-nowrap">{{ g.name }}</th><td class="p-3"><button class="text-primary-600 underline focus-visible:ring-2" :title="'筛选 '+g.name" :aria-label="'筛选 '+g.name" @click="filterSummary(g.plan,g.vm)">{{ g.rows.length }}</button></td><td v-for="(label,state) in labels" :key="state" class="p-3"><button class="rounded px-2 py-1 focus-visible:ring-2" :class="state==='degraded'?'text-red-600 bg-red-50 dark:bg-red-950':state==='not_degraded'?'text-green-700 bg-green-50 dark:bg-green-950':'text-gray-600 dark:text-gray-300'" :title="'筛选 '+g.name+' · '+label" :aria-label="'筛选 '+g.name+' · '+label" @click="filterSummary(g.plan,g.vm,state)">{{ g.counts[state] }}</button></td></tr></tbody>
+    </table>
+   </section>
    <div class="flex flex-wrap gap-2">
     <select v-model="kind" class="input !w-auto min-w-[160px] flex-1" aria-label="检测类型" :disabled="busy"><option value="candy_v1">糖果推理检测</option><option value="pelican_svg_v1">鹈鹕骑自行车 SVG</option></select>
     <select v-model="stateFilter" class="input !w-auto min-w-[160px] flex-1" aria-label="检测状态筛选"><option value="">全部检测状态</option><option v-for="(label,state) in labels" :key="state" :value="state">{{ label }}（{{ items.filter(i => verdict(i) === state).length }}）</option></select>
+    <select v-model="planFilter" class="input !w-auto min-w-[140px] flex-1" aria-label="套餐筛选"><option value="">全部套餐</option><option v-for="p in planOptions" :key="p" :value="p">{{ p }}</option></select>
     <select v-model="vmFilter" class="input !w-auto min-w-[160px] flex-1" aria-label="VM 关联筛选"><option value="">全部 VM 状态</option><option value="not_linked">尚未转入 VM</option><option value="linked">原账号已关联 VM</option><option value="derived">VM 衍生账号</option></select>
     <select v-model="errorFilter" class="input !w-auto min-w-[160px] flex-1" aria-label="异常原因筛选"><option value="">全部异常原因</option><option v-for="f in failures" :key="f.code" :value="f.code">{{ f.label }}</option></select>
     <input v-model="search" class="input flex-1" placeholder="搜索账号、ID、错误信息" aria-label="搜索账号" />
@@ -57,6 +64,8 @@
       <strong>#{{ i.account_id }} {{ i.account_name }}</strong>
       <span :class="verdict(i)==='degraded'?'text-red-600':verdict(i)==='not_degraded'?'text-green-600':'text-amber-600'">{{ labels[verdict(i)] || verdict(i) }}</span>
       <span class="rounded bg-gray-100 px-2 dark:bg-dark-700">{{ vmLabels[i.vm_state] }}{{ i.target_id ? ' → #'+i.target_id : '' }}</span>
+      <span class="rounded bg-blue-50 px-2 text-blue-700 dark:bg-blue-950 dark:text-blue-200">{{ plan(i) }}{{ i.vm_state==='derived' ? ' · VM2API' : ' · 原生' }}</span>
+      <span v-if="i.source_id" class="text-xs text-gray-500">来源 #{{ i.source_id }} {{ i.source_name }}</span>
       <span v-if="i.deleted" class="text-red-600">账号已删除</span>
       <span v-if="i.review" class="text-blue-600">人工审核 · {{ i.review.note }}</span>
      </div>
@@ -97,8 +106,8 @@ import { probeManagementAPI as api, scheduledTestsAPI, type ProbeManagementItem 
 import { getVMBridge, syncVMBridge } from '@/api/admin/vm2api'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/format'
-const props=defineProps<{show:boolean}>();const emit=defineEmits<{(e:'close'):void}>();const app=useAppStore()
-const items=ref<Item[]>([]),loading=ref(false),busy=ref(false),stopQueued=ref(false),search=ref(''),stateFilter=ref(''),vmFilter=ref(''),errorFilter=ref('')
+const props=defineProps<{show:boolean}>();const emit=defineEmits<{(e:'close'):void;(e:'result-updated'):void}>();const app=useAppStore()
+const items=ref<Item[]>([]),loading=ref(false),busy=ref(false),stopQueued=ref(false),search=ref(''),stateFilter=ref(''),vmFilter=ref(''),planFilter=ref(''),errorFilter=ref('')
 const kind=ref<'candy_v1'|'pelican_svg_v1'>('candy_v1'),model=ref('gpt-6.1-sol'),cron=ref('15 4 * * *'),note=ref(''),progress=ref('')
 const settings=ref<ProbeSettings>({concurrency:10,exclude_vm:false,exclude_vm_source:false});const selected=reactive(new Set<number>())
 const pending=ref<{action:string;ids:number[]}|null>(null),reviewing=ref<Item|null>(null),reviewNote=ref(''),reviewVerdict=ref('not_degraded')
@@ -106,20 +115,29 @@ const labels:Record<string,string>={not_degraded:'不降智',degraded:'降智',i
 const vmLabels={not_linked:'尚未转入 VM',linked:'原账号已关联 VM',derived:'VM 衍生账号'}
 const actionLabels:Record<string,string>={run:'检测所选',vm:'转入 VM2API',schedule:'设置定时计划',disable:'禁用计划',exclude:'排除检测',include:'取消账号排除',resume:'修复后恢复检测',cleanup:'停用已删除账号计划'}
 function verdict(i:Item){return i.review?.verdict || (i.failure?'inconclusive':i.result?.quality?.verdict || (i.result?.pelican ? (i.result.pelican.verdict==='reference_only' || i.result.pelican.verdict==='structural_pass'?'structural_pass':i.result.pelican.verdict==='inconclusive'?'inconclusive':'invalid_svg') : 'not_tested'))}
-const filtered=computed(()=>items.value.filter(i=>(!stateFilter.value||verdict(i)===stateFilter.value)&&(!vmFilter.value||i.vm_state===vmFilter.value)&&(!errorFilter.value||i.failure?.code===errorFilter.value)&&`${i.account_id} ${i.account_name} ${i.result?.error_message||''}`.toLowerCase().includes(search.value.toLowerCase())))
+const filtered=computed(()=>items.value.filter(i=>(!stateFilter.value||verdict(i)===stateFilter.value)&&(!vmFilter.value||i.vm_state===vmFilter.value)&&(!planFilter.value||plan(i)===planFilter.value)&&(!errorFilter.value||i.failure?.code===errorFilter.value)&&`${i.account_id} ${i.account_name} ${i.result?.error_message||''}`.toLowerCase().includes(search.value.toLowerCase())))
+function plan(i:Item){const p=(i.plan_type||'unknown').toLowerCase().trim();return p.includes('pro')?'Pro':p.includes('plus')?'Plus':p==='unknown'?'未知套餐':p.toUpperCase()}
+const planOptions=computed(()=>Array.from(new Set(items.value.map(plan))).sort())
+const summaries=computed(()=>[
+ {name:'全部账号',plan:'',vm:'',rows:items.value},
+ ...['Pro','Plus'].map(p=>({name:p,plan:p,vm:'',rows:items.value.filter(i=>plan(i)===p)})),
+ {name:'VM2API',plan:'',vm:'derived',rows:items.value.filter(i=>i.vm_state==='derived')},
+ ...['Pro','Plus'].map(p=>({name:'VM2API · '+p,plan:p,vm:'derived',rows:items.value.filter(i=>i.vm_state==='derived'&&plan(i)===p)}))
+].map(g=>({...g,counts:Object.fromEntries(Object.keys(labels).map(v=>[v,g.rows.filter(i=>verdict(i)===v).length]))})))
+function filterSummary(p:string,vm:string,state=''){planFilter.value=p;vmFilter.value=vm;stateFilter.value=state;errorFilter.value='';search.value=''}
 const failures=computed(()=>Array.from(new Map(items.value.flatMap(i=>i.failure?[[i.failure.code,i.failure] as const]:[])).values()))
 function gate(i:Item){if(i.deleted)return '账号已删除';if(i.control.excluded)return '账号已排除检测：'+(i.control.note||'未填写备注');if(settings.value.exclude_vm&&i.vm_state==='derived')return '全局设置已排除 VM 衍生账号';if(settings.value.exclude_vm_source&&i.vm_state==='linked')return '已全局排除已转为 vm2api 的原生账号检测（已有计划不执行）';if(i.control.pause_code&&(!i.control.pause_until||Date.parse(i.control.pause_until)>Date.now()))return i.control.pause_until?'异常退避至 '+formatDateTime(i.control.pause_until):'异常暂停，修复后需手动恢复检测';return ''}
 let generation=0
 async function load(){const g=++generation;loading.value=true;try{const [data,config]=await Promise.all([api.list(kind.value),api.settings()]);if(g===generation){items.value=data;settings.value=config}}catch(e:any){app.showError(e.message)}finally{if(g===generation)loading.value=false}}
 watch(()=>props.show,v=>{if(v)void load();else{generation++;stopQueued.value=true;pending.value=null}})
 watch(kind,()=>{selected.clear();stateFilter.value='';errorFilter.value='';reviewing.value=null;if(kind.value==='candy_v1')model.value='gpt-6.1-sol';if(props.show)void load()})
-watch([search,stateFilter,vmFilter,errorFilter],()=>{selected.clear();pending.value=null})
+watch([search,stateFilter,vmFilter,planFilter,errorFilter],()=>{selected.clear();pending.value=null})
 onBeforeUnmount(()=>{generation++;stopQueued.value=true})
 function toggle(id:number){selected.has(id)?selected.delete(id):selected.add(id)}
 function selectFiltered(){selected.clear();filtered.value.filter(i=>!i.deleted).forEach(i=>selected.add(i.account_id))}
 function prepare(action:string,ids?:number[]){pending.value={action,ids:ids||Array.from(selected)};note.value=''}
 async function saveSettings(){busy.value=true;try{settings.value=await api.saveSettings(settings.value);app.showSuccess('检测设置已保存')}catch(e:any){app.showError(e.message)}finally{busy.value=false}}
-async function runOne(i:Item){if(gate(i)){return '#'+i.account_id+' 跳过：'+gate(i)}let plan=i.plans.find(p=>p.model_id===model.value);if(!plan)plan=await scheduledTestsAPI.create({account_id:i.account_id,test_kind:kind.value,model_id:model.value,cron_expression:cron.value,enabled:false,max_results:50});const r=await scheduledTestsAPI.runNow(plan.id);i.result=r;return '#'+i.account_id+' '+(r.status==='success'?'完成':'调用异常（不重试）')}
+async function runOne(i:Item){if(gate(i)){return '#'+i.account_id+' 跳过：'+gate(i)}let plan=i.plans.find(p=>p.model_id===model.value);if(!plan)plan=await scheduledTestsAPI.create({account_id:i.account_id,test_kind:kind.value,model_id:model.value,cron_expression:cron.value,enabled:false,max_results:50});const r=await scheduledTestsAPI.runNow(plan.id);i.result=r;i.failure=undefined;i.review=undefined;emit('result-updated');return '#'+i.account_id+' '+(r.status==='success'?'完成':'调用异常（不重试）')}
 async function transfer(i:Item){if(i.vm_state!=='not_linked'||i.account_type!=='oauth'||i.deleted)return '#'+i.account_id+' 跳过：已关联或非 OAuth 账号'
  let state=await getVMBridge(i.account_id)
  if(!state.enabled)throw new Error('VM2API 尚未配置')
