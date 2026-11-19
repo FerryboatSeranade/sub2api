@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 )
 
@@ -99,6 +100,29 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	selectFn := func(ctx context.Context, excluded map[int64]struct{}) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 		return s.selectAccountWithoutReasoningTiers(ctx, groupID, previousResponseID, sessionHash, requestedModel, excluded, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	}
+
+	// Configured source layers replace legacy quality ordering for explicit entry groups/models.
+	if s.sourceTiers != nil && groupID != nil && NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI {
+		cfg, e := s.SourceTierConfig(ctx)
+		if e != nil {
+			return nil, OpenAIAccountScheduleDecision{}, e
+		}
+		target, _ := ctx.Value(codexTicketDiagnosticTargetKey{}).(int64)
+		if cfg.Enabled && cfg.matchesEntryGroup(*groupID) && slices.Contains(cfg.Models, requestedModel) && target == 0 {
+			eligible, scopeErr := s.sourceTierEntryIsOpenAI(ctx, *groupID)
+			if scopeErr != nil {
+				return nil, OpenAIAccountScheduleDecision{}, scopeErr
+			}
+			if !eligible {
+				return selectFn(ctx, excludedIDs)
+			}
+			owned := (previousResponseID != "" && !previousResponseCanMove) || preserveOpenAIGuardianParentBinding(ctx, sessionHash)
+			fn := func(c context.Context, g *int64, session string, blocked map[int64]struct{}) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+				return s.selectAccountWithoutReasoningTiers(c, g, previousResponseID, session, requestedModel, blocked, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+			}
+			return s.selectSourceTiers(ctx, cfg, *groupID, requestedModel, sessionHash, excludedIDs, owned, fn)
+		}
+	}
 	// Account-owned continuations and diagnostics must keep their required owner.
 	target, _ := ctx.Value(codexTicketDiagnosticTargetKey{}).(int64)
 	if NormalizeOpenAICompatiblePlatform(platform) != PlatformOpenAI || (previousResponseID != "" && !previousResponseCanMove) || target > 0 || preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
@@ -125,6 +149,10 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 func reasoningRouteSnapshot(account *Account) *string {
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
+	}
+	if account.SourceRoutingLabel != "" {
+		v := account.SourceRoutingLabel
+		return &v
 	}
 	value := "质量优先 / 原有调度"
 	if account.ReasoningFallbackReason != "" {

@@ -455,7 +455,13 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/groups',
+    path: '/admin/source-tier-routing',
+ name:'AdminSourceTierRouting',
+ component:()=>import('@/views/admin/SourceTierRoutingView.vue'),
+ meta:{requiresAuth:true,requiresAdmin:true,title:'分层调度'}
+ },
+ {
+ path: '/admin/groups',
     name: 'AdminGroups',
     component: () => import('@/views/admin/GroupsView.vue'),
     meta: {

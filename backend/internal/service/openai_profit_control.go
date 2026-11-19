@@ -336,6 +336,7 @@ func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, sele
 			copy := *latest
 			copy.ReasoningRoutingTier = selected.ReasoningRoutingTier
 			copy.ReasoningFallbackReason = selected.ReasoningFallbackReason
+ copy.SourceRoutingLabel = selected.SourceRoutingLabel
 			latest = &copy
 		}
 	}()

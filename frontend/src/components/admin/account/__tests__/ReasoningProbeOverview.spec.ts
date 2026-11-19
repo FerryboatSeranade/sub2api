@@ -32,3 +32,32 @@ describe('plan and transport dimensions',()=>{
   expect(w.emitted('result-updated')).toHaveLength(1)
  })
 })
+
+describe('manual probes bypass previous failures',()=>{
+ it('runs paused and backing-off accounts once and continues after an error',async()=>{
+  const rows=[item(1),item(2),item(3)]
+  rows.forEach(row=>{row.plans[0]={...row.plans[0],model_id:'gpt-6.1-sol'} as any})
+  rows[0]!.control.pause_code='invalid_credentials'
+  rows[1]!.control.pause_code='rate_limited'
+  rows[1]!.control.pause_until='2099-01-01T00:00:00Z' as any
+  m.list.mockResolvedValue(rows)
+  m.settings.mockResolvedValue({concurrency:1,exclude_vm:false,exclude_vm_source:false})
+  m.run.mockRejectedValueOnce(new Error('upstream 401')).mockResolvedValueOnce({...rows[1]!.result,status:'error'}).mockResolvedValueOnce(rows[2]!.result)
+  const w=await setup()
+  expect(w.findAll('article button').filter(b=>b.text()==='立即检测').every(b=>b.attributes('disabled')===undefined)).toBe(true)
+  await button(w,'全选筛选').trigger('click');await button(w,'检测所选').trigger('click');await button(w,'确认执行').trigger('click');await flushPromises()
+  expect(m.run.mock.calls.map(c=>c[0])).toEqual([1,2,3])
+  expect(w.text()).toContain('#1 失败：upstream 401')
+  expect(w.text()).toContain('#2 调用异常（不重试）')
+  expect(w.text()).toContain('#3 完成')
+  expect(m.action).not.toHaveBeenCalled()
+ })
+ it('keeps explicit account exclusions even when paused',async()=>{
+  const row=item(1);row.control.excluded=true;row.control.pause_code='invalid_credentials'
+  m.list.mockResolvedValue([row])
+  const w=await setup()
+  await button(w,'全选筛选').trigger('click');await button(w,'检测所选').trigger('click');await button(w,'确认执行').trigger('click');await flushPromises()
+  expect(m.run).not.toHaveBeenCalled()
+  expect(w.text()).toContain('#1 跳过：账号已排除检测')
+ })
+})

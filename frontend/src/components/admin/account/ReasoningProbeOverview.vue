@@ -31,7 +31,7 @@
      <button class="btn btn-secondary" :disabled="busy" title="只选择当前筛选结果；后续修改筛选会清空选择" @click="selectFiltered">全选筛选结果（{{ filtered.length }}）</button>
      <button class="btn btn-secondary" :disabled="busy" title="清空所有已选账号" @click="selected.clear()">清空选择</button>
      <span>已选 {{ selected.size }} 个账号</span>
-     <button class="btn btn-primary" :disabled="busy || !selected.size" title="跳过已排除、暂停或退避中的账号，不循环重试失败请求" @click="prepare('run')">检测所选（并发 {{ settings.concurrency }}）</button>
+     <button class="btn btn-primary" :disabled="busy || !selected.size" title="默认忽略历史异常暂停和退避，逐个检测一次；仍跳过已排除账号，失败后继续后续账号" @click="prepare('run')">检测所选（并发 {{ settings.concurrency }}）</button>
      <button class="btn btn-secondary" :disabled="busy || !selected.size" title="仅转入尚未关联的 OAuth 账号；逐个完成，失败不自动重试" @click="prepare('vm')">批量转入 VM2API</button>
      <button v-if="busy" class="btn btn-secondary" title="停止未启动的队列；已在服务器启动的任务继续完成" @click="stopQueued=true">停止后续队列</button>
     </div>
@@ -45,7 +45,7 @@
      <button class="btn btn-secondary" :disabled="busy || !selected.size" title="修复凭证、分组或权限后使用；解除异常暂停和退避，不改变排除设置" @click="prepare('resume')">修复后恢复检测</button>
      <button class="btn btn-secondary" :disabled="busy" title="只禁用已删除账号的残留计划，不删除历史记录" @click="prepare('cleanup')">停用已删除账号计划</button>
     </div>
-    <p class="text-xs text-gray-500">批量转入：先筛选“不降智”与“尚未转入 VM”，全选后操作。真实 API 验证通过才关闭原账号直接调度，并迁移计划。检测排除不跳过这次必要的接入验证。永久异常需修复后恢复；临时异常按 5 分钟 / 15 分钟 / 1 小时起步逐次退避，最长 6 小时，不立即重试。</p>
+    <p class="text-xs text-gray-500">批量转入：先筛选“不降智”与“尚未转入 VM”，全选后操作。真实 API 验证通过才关闭原账号直接调度，并迁移计划。检测排除不跳过这次必要的接入验证。手动检测默认忽略历史异常暂停和退避，每个账号检测一次，失败后继续后续账号；已排除账号仍跳过。定时检测仍遵循异常暂停和退避规则。</p>
    </div>
    <div v-if="pending" class="rounded-lg border border-amber-400 bg-amber-50 p-3 space-y-2 dark:bg-dark-800" role="alert">
     <strong>确认操作：{{ actionLabels[pending.action] }} · {{ pending.ids.length }} 个账号</strong>
@@ -74,7 +74,7 @@
       <span>{{ i.plans.filter(p=>p.enabled).length }} / {{ i.plans.length }} 个计划启用</span>
       <span v-for="p in i.plans" :key="p.id">#{{ p.id }} {{ p.cron_expression }} {{ p.enabled?'启用':'禁用' }} · 下次 {{ p.next_run_at ? formatDateTime(p.next_run_at) : '—' }}</span>
      </div>
-     <p v-if="gate(i)" class="mt-2 text-xs text-amber-700">{{ gate(i) }}。计划即使启用也不会自动执行。</p>
+     <p v-if="gate(i)" class="mt-2 text-xs text-amber-700">{{ gate(i) }}。计划即使启用也不会自动执行；手动检测可忽略异常暂停和退避，明确排除仍有效。</p>
      <p v-if="i.failure" class="mt-2 text-sm text-red-600">{{ i.failure.label }}：{{ i.failure.advice }}</p>
      <p v-if="i.result?.quality" class="mt-2 text-xs">自动判定：{{ labels[i.result.quality.verdict] }}；提取数字：{{ i.result.quality.numbers?.join(', ') || '—' }}</p>
      <img v-if="i.result?.pelican?.svg" :src="'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(i.result.pelican.svg)" alt="最新鹈鹕骑车 SVG，供人工审核" class="mt-2 h-40 max-w-full bg-white object-contain" loading="lazy" />
@@ -83,7 +83,7 @@
       <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words">{{ i.result.error_message || i.result.response_text }}</pre>
      </details>
      <div class="mt-2 flex gap-3 text-xs">
-      <button :disabled="busy || !!gate(i) || i.deleted" class="text-primary-600 disabled:opacity-40" title="发起一次检测；不循环重试" @click="prepare('run',[i.account_id])">立即检测</button>
+      <button :disabled="busy || !!gate(i,true) || i.deleted" class="text-primary-600 disabled:opacity-40" title="忽略历史异常暂停和退避，发起一次检测；不循环重试" @click="prepare('run',[i.account_id])">立即检测</button>
       <button v-if="i.result && !i.deleted" :disabled="busy" class="text-primary-600" title="保留自动判定，添加人工复核标记；新检测结果产生后标记失效" @click="reviewing=i;reviewNote='';reviewVerdict='not_degraded'">人工审核标记</button>
      </div>
      <div v-if="reviewing?.account_id===i.account_id" class="mt-2 rounded border p-2 space-y-2">
@@ -126,7 +126,7 @@ const summaries=computed(()=>[
 ].map(g=>({...g,counts:Object.fromEntries(Object.keys(labels).map(v=>[v,g.rows.filter(i=>verdict(i)===v).length]))})))
 function filterSummary(p:string,vm:string,state=''){planFilter.value=p;vmFilter.value=vm;stateFilter.value=state;errorFilter.value='';search.value=''}
 const failures=computed(()=>Array.from(new Map(items.value.flatMap(i=>i.failure?[[i.failure.code,i.failure] as const]:[])).values()))
-function gate(i:Item){if(i.deleted)return '账号已删除';if(i.control.excluded)return '账号已排除检测：'+(i.control.note||'未填写备注');if(settings.value.exclude_vm&&i.vm_state==='derived')return '全局设置已排除 VM 衍生账号';if(settings.value.exclude_vm_source&&i.vm_state==='linked')return '已全局排除已转为 vm2api 的原生账号检测（已有计划不执行）';if(i.control.pause_code&&(!i.control.pause_until||Date.parse(i.control.pause_until)>Date.now()))return i.control.pause_until?'异常退避至 '+formatDateTime(i.control.pause_until):'异常暂停，修复后需手动恢复检测';return ''}
+function gate(i:Item,manual=false){if(i.deleted)return '账号已删除';if(i.control.excluded)return '账号已排除检测：'+(i.control.note||'未填写备注');if(settings.value.exclude_vm&&i.vm_state==='derived')return '全局设置已排除 VM 衍生账号';if(settings.value.exclude_vm_source&&i.vm_state==='linked')return '已全局排除已转为 vm2api 的原生账号检测（已有计划不执行）';if(!manual&&i.control.pause_code&&(!i.control.pause_until||Date.parse(i.control.pause_until)>Date.now()))return i.control.pause_until?'异常退避至 '+formatDateTime(i.control.pause_until):'异常暂停，修复后需手动恢复检测';return ''}
 let generation=0
 async function load(){const g=++generation;loading.value=true;try{const [data,config]=await Promise.all([api.list(kind.value),api.settings()]);if(g===generation){items.value=data;settings.value=config}}catch(e:any){app.showError(e.message)}finally{if(g===generation)loading.value=false}}
 watch(()=>props.show,v=>{if(v)void load();else{generation++;stopQueued.value=true;pending.value=null}})
@@ -137,7 +137,7 @@ function toggle(id:number){selected.has(id)?selected.delete(id):selected.add(id)
 function selectFiltered(){selected.clear();filtered.value.filter(i=>!i.deleted).forEach(i=>selected.add(i.account_id))}
 function prepare(action:string,ids?:number[]){pending.value={action,ids:ids||Array.from(selected)};note.value=''}
 async function saveSettings(){busy.value=true;try{settings.value=await api.saveSettings(settings.value);app.showSuccess('检测设置已保存')}catch(e:any){app.showError(e.message)}finally{busy.value=false}}
-async function runOne(i:Item){if(gate(i)){return '#'+i.account_id+' 跳过：'+gate(i)}let plan=i.plans.find(p=>p.model_id===model.value);if(!plan)plan=await scheduledTestsAPI.create({account_id:i.account_id,test_kind:kind.value,model_id:model.value,cron_expression:cron.value,enabled:false,max_results:50});const r=await scheduledTestsAPI.runNow(plan.id);i.result=r;i.failure=undefined;i.review=undefined;emit('result-updated');return '#'+i.account_id+' '+(r.status==='success'?'完成':'调用异常（不重试）')}
+async function runOne(i:Item){const blocked=gate(i,true);if(blocked){return '#'+i.account_id+' 跳过：'+blocked}let plan=i.plans.find(p=>p.model_id===model.value);if(!plan)plan=await scheduledTestsAPI.create({account_id:i.account_id,test_kind:kind.value,model_id:model.value,cron_expression:cron.value,enabled:false,max_results:50});const r=await scheduledTestsAPI.runNow(plan.id);i.result=r;i.failure=undefined;i.review=undefined;emit('result-updated');return '#'+i.account_id+' '+(r.status==='success'?'完成':'调用异常（不重试）')}
 async function transfer(i:Item){if(i.vm_state!=='not_linked'||i.account_type!=='oauth'||i.deleted)return '#'+i.account_id+' 跳过：已关联或非 OAuth 账号'
  let state=await getVMBridge(i.account_id)
  if(!state.enabled)throw new Error('VM2API 尚未配置')

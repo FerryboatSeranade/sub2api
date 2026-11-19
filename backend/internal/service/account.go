@@ -24,7 +24,8 @@ import (
 
 type Account struct {
 	// Request-local scheduling annotations; never persisted on accounts.
-	ReasoningRoutingTier    int
+	SourceRoutingLabel string
+ ReasoningRoutingTier    int
 	ReasoningFallbackReason string
 	ID                      int64
 	Name                    string
