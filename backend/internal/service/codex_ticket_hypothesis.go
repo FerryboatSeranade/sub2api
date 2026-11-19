@@ -240,6 +240,7 @@ func (runner *CodexHypothesisRunner) buildRequest(ctx context.Context, challenge
 		request.Header[name] = values
 	}
 	request.Header.Del("conversation_id")
+	projectCodexOutboundHeaders(request.Header, false)
 	if err := runner.checkReplayIdentity(request); err != nil {
 		return nil, err
 	}
@@ -280,9 +281,9 @@ func (runner *CodexHypothesisRunner) checkReplayIdentity(request *http.Request) 
 		body.ClientMetadata["x-codex-installation-id"] != runner.options.Replay.InstallationID ||
 		body.ClientMetadata["x-codex-window-id"] != runner.windowID ||
 		body.ClientMetadata["x-codex-turn-metadata"] != metadata ||
-		request.Header.Get("session_id") != runner.sessionID || request.Header.Get("session-id") != runner.sessionID ||
+		request.Header.Get("session_id") != "" || request.Header.Get("session-id") != runner.sessionID ||
 		request.Header.Get("thread-id") != runner.sessionID || request.Header.Get("x-client-request-id") != runner.sessionID ||
-		request.Header.Get("x-codex-installation-id") != runner.options.Replay.InstallationID ||
+		request.Header.Get("x-codex-installation-id") != "" ||
 		request.Header.Get("x-codex-window-id") != runner.windowID ||
 		turn.SessionID != runner.sessionID || turn.ThreadID != runner.sessionID || turn.TurnID == "" ||
 		turn.InstallationID != runner.options.Replay.InstallationID || turn.WindowID != runner.windowID ||
@@ -297,7 +298,7 @@ func (runner *CodexHypothesisRunner) checkHeaders(request *http.Request, tickete
 		return errors.New("normal request path changed method, URL or Host")
 	}
 	if request.Header.Get("User-Agent") != buildCodexCLIUserAgent(codexHypothesisClientVersion) ||
-		request.Header.Get("originator") != "codex-tui" || request.Header.Get("version") != codexHypothesisClientVersion {
+		request.Header.Get("originator") != "codex_cli_rs" || request.Header.Get("version") != codexHypothesisClientVersion {
 		return errors.New("outbound Codex identity does not match pinned version")
 	}
 	runner.baselineMu.Lock()

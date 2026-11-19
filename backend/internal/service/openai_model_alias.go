@@ -37,13 +37,19 @@ func normalizeKnownOpenAICodexModel(model string) string {
 		}
 	}
 
-	if openai.IsGPT6SolFamilyModelSpelling(normalized) {
-		switch {
-		case openai.IsGPT61SolModelSpelling(normalized):
-			return "gpt-6.1-sol"
-		case strings.HasPrefix(normalized, "gpt-6-sol"):
+	if base := openai.GPT62ModelID(normalized); base != "" {
+		return base
+	}
+	if openai.IsGPT61TerraModelSpelling(normalized) {
+		return "gpt-6.1-terra"
+	}
+	if openai.IsGPT61SolModelSpelling(normalized) {
+		return "gpt-6.1-sol"
+	}
+	if openai.IsGPT6SolOrLunaModelSpelling(normalized) {
+		if strings.HasPrefix(normalized, "gpt-6-sol") {
 			return "gpt-6-sol"
-		default:
+		} else {
 			return "gpt-6-luna"
 		}
 	}
@@ -163,5 +169,5 @@ func firstUsageBillingModel(candidates []string) string {
 	return ""
 }
 func isOpenAIGPT6Model(model string) bool {
-	return isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolFamilyModelSpelling(model)
+	return openai.GPT62ModelID(model) != "" || openai.IsGPT61TerraModelSpelling(model) || isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolOrLunaModelSpelling(model) || openai.IsGPT61SolModelSpelling(model)
 }

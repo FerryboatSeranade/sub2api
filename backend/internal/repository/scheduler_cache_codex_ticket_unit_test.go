@@ -59,6 +59,9 @@ func TestSchedulerCacheCodexTicketProjectionAndLegacyRebuild(t *testing.T) {
 		raw, err := json.Marshal(legacy)
 		require.NoError(t, err)
 		require.NoError(t, cache.rdb.Set(ctx, schedulerAccountMetaKey("991"), raw, 0).Err())
+		// Simulate a fresh process reading legacy Redis metadata; direct Redis writes
+		// do not publish the revisions used by the upstream in-process cache.
+		cache.dropSnapshotEntry(bucket.String())
 		_, hit, err = cache.GetSnapshot(ctx, bucket)
 		require.NoError(t, err)
 		require.False(t, hit, "old metadata must cause DB fallback and republish")

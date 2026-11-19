@@ -13,12 +13,12 @@ import (
 type ScheduledTestHandler struct {
 	scheduledTestSvc *service.ScheduledTestService
 	runner           *service.ScheduledTestRunnerService
- gateway *service.OpenAIGatewayService
+	gateway          *service.OpenAIGatewayService
 }
 
 // NewScheduledTestHandler creates a new ScheduledTestHandler.
 func NewScheduledTestHandler(scheduledTestSvc *service.ScheduledTestService, runner *service.ScheduledTestRunnerService, gateway *service.OpenAIGatewayService) *ScheduledTestHandler {
-	return &ScheduledTestHandler{scheduledTestSvc: scheduledTestSvc, runner: runner,gateway:gateway}
+	return &ScheduledTestHandler{scheduledTestSvc: scheduledTestSvc, runner: runner, gateway: gateway}
 }
 
 type createScheduledTestPlanRequest struct {
