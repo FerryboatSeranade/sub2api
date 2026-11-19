@@ -184,6 +184,8 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	gateway.GET("/usage/records", h.Usage.KeyRecords)
+	gateway.GET("/usage/models", h.Usage.KeyModels)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
 	gateway.Use(openAIBPSEndpointGuard)
