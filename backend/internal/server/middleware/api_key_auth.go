@@ -174,7 +174,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
 		c.Request = c.Request.WithContext(ctx)
 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing" ||
-			(c.Request.Method == http.MethodGet && (c.Request.URL.Path == "/v1/usage/records" || c.Request.URL.Path == "/v1/usage/models"))
+			(c.Request.Method == http.MethodGet && (c.Request.URL.Path == "/v1/usage/records" || c.Request.URL.Path == "/v1/usage/overview" || c.Request.URL.Path == "/v1/usage/models"))
 		// Async image task polling only reads data that already belongs to the
 		// authenticated key and must remain available after the completed
 		// generation consumes the key's remaining balance.

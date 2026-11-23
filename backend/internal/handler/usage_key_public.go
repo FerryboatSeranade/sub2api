@@ -58,19 +58,40 @@ func keyUsageFilters(c *gin.Context) (usagestats.UsageLogFilters, bool) {
 	return usagestats.UsageLogFilters{UserID: key.UserID, APIKeyID: key.ID, Model: model, ModelFilterSource: usagestats.ModelSourceRequested, StartTime: &start, EndTime: &end, ExactTotal: true}, true
 }
 
+type publicUsageName struct {
+	Name string `json:"name"`
+}
+
 type publicKeyUsageRecord struct {
-	ID                  int64     `json:"id"`
-	RequestID           string    `json:"request_id"`
-	Model               string    `json:"model"`
-	InputTokens         int       `json:"input_tokens"`
-	OutputTokens        int       `json:"output_tokens"`
-	CacheCreationTokens int       `json:"cache_creation_tokens"`
-	CacheReadTokens     int       `json:"cache_read_tokens"`
-	TotalCost           float64   `json:"total_cost"`
-	ActualCost          float64   `json:"actual_cost"`
-	DurationMs          *int      `json:"duration_ms"`
-	Stream              bool      `json:"stream"`
-	CreatedAt           time.Time `json:"created_at"`
+	APIKey                    publicUsageName  `json:"api_key"`
+	Group                     *publicUsageName `json:"group"`
+	ReasoningEffort           *string          `json:"reasoning_effort"`
+	InboundEndpoint           *string          `json:"inbound_endpoint"`
+	RequestType               string           `json:"request_type"`
+	BillingMode               *string          `json:"billing_mode"`
+	BillingType               int8             `json:"billing_type"`
+	FirstTokenMs              *int             `json:"first_token_ms"`
+	InputCost                 float64          `json:"input_cost"`
+	OutputCost                float64          `json:"output_cost"`
+	CacheCreationCost         float64          `json:"cache_creation_cost"`
+	CacheReadCost             float64          `json:"cache_read_cost"`
+	RateMultiplier            float64          `json:"rate_multiplier"`
+	ImageCount                int              `json:"image_count"`
+	ImageInputTokens          int              `json:"image_input_tokens"`
+	ImageOutputTokens         int              `json:"image_output_tokens"`
+	LongContextBillingApplied bool             `json:"long_context_billing_applied"`
+	ID                        int64            `json:"id"`
+	RequestID                 string           `json:"request_id"`
+	Model                     string           `json:"model"`
+	InputTokens               int              `json:"input_tokens"`
+	OutputTokens              int              `json:"output_tokens"`
+	CacheCreationTokens       int              `json:"cache_creation_tokens"`
+	CacheReadTokens           int              `json:"cache_read_tokens"`
+	TotalCost                 float64          `json:"total_cost"`
+	ActualCost                float64          `json:"actual_cost"`
+	DurationMs                *int             `json:"duration_ms"`
+	Stream                    bool             `json:"stream"`
+	CreatedAt                 time.Time        `json:"created_at"`
 }
 
 // KeyRecords is an authenticated, key-scoped public read API, not a panel session.
@@ -102,12 +123,33 @@ func (h *UsageHandler) KeyRecords(c *gin.Context) {
 		return
 	}
 	items := make([]publicKeyUsageRecord, 0, len(logs))
+	key, _ := middleware.GetAPIKeyFromContext(c)
 	for _, log := range logs {
+		var group *publicUsageName
+		if log.Group != nil {
+			group = &publicUsageName{log.Group.Name}
+		}
 		model := strings.TrimSpace(log.RequestedModel)
 		if model == "" {
 			model = log.Model
 		}
-		items = append(items, publicKeyUsageRecord{ID: log.ID, RequestID: log.RequestID, Model: model, InputTokens: log.InputTokens, OutputTokens: log.OutputTokens, CacheCreationTokens: log.CacheCreationTokens, CacheReadTokens: log.CacheReadTokens, TotalCost: log.TotalCost, ActualCost: log.ActualCost, DurationMs: log.DurationMs, Stream: log.Stream, CreatedAt: log.CreatedAt})
+		items = append(items, publicKeyUsageRecord{APIKey: publicUsageName{key.Name}, Group: group,
+			ReasoningEffort:           log.ReasoningEffort,
+			InboundEndpoint:           log.InboundEndpoint,
+			RequestType:               log.EffectiveRequestType().String(),
+			BillingMode:               log.BillingMode,
+			BillingType:               log.BillingType,
+			FirstTokenMs:              log.FirstTokenMs,
+			InputCost:                 log.InputCost,
+			OutputCost:                log.OutputCost,
+			CacheCreationCost:         log.CacheCreationCost,
+			CacheReadCost:             log.CacheReadCost,
+			RateMultiplier:            log.RateMultiplier,
+			ImageCount:                log.ImageCount,
+			ImageInputTokens:          log.ImageInputTokens,
+			ImageOutputTokens:         log.ImageOutputTokens,
+			LongContextBillingApplied: log.LongContextBillingApplied,
+			ID:                        log.ID, RequestID: log.RequestID, Model: model, InputTokens: log.InputTokens, OutputTokens: log.OutputTokens, CacheCreationTokens: log.CacheCreationTokens, CacheReadTokens: log.CacheReadTokens, TotalCost: log.TotalCost, ActualCost: log.ActualCost, DurationMs: log.DurationMs, Stream: log.Stream, CreatedAt: log.CreatedAt})
 	}
 	response.Paginated(c, items, result.Total, page, size)
 }
@@ -135,4 +177,52 @@ func (h *UsageHandler) KeyModels(c *gin.Context) {
 		items = append(items, modelOption{s.Model, s.Requests})
 	}
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"items": items, "start_time": filters.StartTime, "end_time": filters.EndTime}})
+}
+
+func (h *UsageHandler) KeyOverview(c *gin.Context) {
+	f, ok := keyUsageFilters(c)
+	if !ok {
+		return
+	}
+	granularity := c.DefaultQuery("granularity", "day")
+	if granularity != "day" && granularity != "hour" {
+		response.BadRequest(c, "Invalid granularity")
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	start, end := *f.StartTime, *f.EndTime
+	stats, err := h.usageService.GetStatsWithFilters(ctx, f)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	stats.TotalAccountCost = nil
+	stats.UpstreamEndpoints = nil
+	stats.EndpointPaths = nil
+	for i := range stats.Endpoints {
+		stats.Endpoints[i].AccountCost = 0
+	}
+	models, err := h.usageService.GetModelStatsWithFiltersBySource(ctx, start, end, f, usagestats.ModelSourceRequested)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	for i := range models {
+		models[i].AccountCost = 0
+	}
+	groups, err := h.usageService.GetGroupStatsWithFilters(ctx, start, end, f)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	for i := range groups {
+		groups[i].AccountCost = 0
+	}
+	trend, err := h.usageService.GetUsageTrendWithFilters(ctx, start, end, granularity, f)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"stats": stats, "models": models, "groups": groups, "trend": trend})
 }
