@@ -1,6 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
+      <div class="text-right"><RouterLink class="text-sm text-primary-600 hover:underline" to="/usage/lookup">用完整 API 密钥查询</RouterLink></div>
       <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
       <div class="space-y-4">
